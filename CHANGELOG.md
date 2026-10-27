@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.0a4] - 2026-10-27
+
+### Changed
+
+- README and code no longer reference internal Jira tickets; example links
+  use fully qualified URLs.
+
+### Fixed
+
+- Release workflow: release creation is idempotent (uploads to an existing
+  release instead of failing) and the SBOM step passes the correct
+  cyclonedx-py output flag.
+
 ## [0.1.0a3] - 2026-10-13
 
 ### Changed
