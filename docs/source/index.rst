@@ -11,6 +11,7 @@ FastAPI integration for PyMongo.
    objectid
    settings
    lifespan
+   pagination
    api
    reference
    changelog

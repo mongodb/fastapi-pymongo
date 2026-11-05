@@ -9,3 +9,5 @@ Full autodoc output is documented alongside each usage guide:
   :func:`fastapi_pymongo.lifespan.get_client`,
   :func:`fastapi_pymongo.lifespan.get_database`. See :doc:`lifespan`.
 - :func:`fastapi_pymongo.beanie.beanie_lifespan`. See :doc:`beanie`.
+- :func:`fastapi_pymongo.pagination.cursor_page`,
+  :func:`fastapi_pymongo.pagination.page_params`. See :doc:`pagination`.

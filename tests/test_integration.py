@@ -5,6 +5,7 @@ Skip these locally with: pytest -m "not integration".
 """
 
 import asyncio
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -12,10 +13,18 @@ from bson import ObjectId
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, Field
-from pymongo import AsyncMongoClient
+from pymongo import DESCENDING, AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
-from fastapi_pymongo import MongoSettings, PyObjectId, get_client, mongo_lifespan
+from fastapi_pymongo import (
+    InvalidCursor,
+    MongoSettings,
+    PageParams,
+    PyObjectId,
+    cursor_page,
+    get_client,
+    mongo_lifespan,
+)
 from fastapi_pymongo.lifespan import get_database
 
 pytestmark = pytest.mark.integration
@@ -136,3 +145,313 @@ def test_client_carries_handshake_driver_metadata(app_and_db):
         driver = client.options._options["driver"]
         assert driver.name == "fastapi-pymongo"
         assert driver.version == version("fastapi-pymongo")
+
+
+# --- cursor pagination tests -------------------------------------------------
+
+
+def _seed(app_and_db, documents):
+    """Replace the collection's contents with ``documents``."""
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            collection = client[database].items
+            await collection.delete_many({})
+            if documents:
+                await collection.insert_many(documents)
+
+    asyncio.run(_run())
+
+
+def _page_all(app_and_db, *, size, **kwargs):
+    """Walk every page with :func:`cursor_page` and return the documents seen."""
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            collection = client[database].items
+            seen = []
+            params = PageParams(size=size)
+            while True:
+                page = await cursor_page(collection, params, **kwargs)
+                # A page is never larger than requested, and every page but
+                # the last is exactly `size`, so the walk really paginates.
+                assert len(page.items) <= size
+                if page.next_cursor is not None:
+                    assert len(page.items) == size
+                seen.extend(page.items)
+                if page.next_cursor is None:
+                    return seen
+                params = PageParams(cursor=page.next_cursor, size=size)
+
+    return asyncio.run(_run())
+
+
+def test_cursor_page_walks_all_documents_once_in_order(app_and_db):
+    # An exact match against range(n) also proves no duplicates and no gaps.
+    _seed(app_and_db, [{"n": i} for i in range(10)])
+    seen = [d["n"] for d in _page_all(app_and_db, size=3, sort_field="n")]
+    assert seen == list(range(10))
+
+
+def test_cursor_page_breaks_ties_on_id(app_and_db):
+    # Every document shares one sort value, so the _id tiebreaker is the only
+    # thing keeping the walk stable and complete.
+    _seed(app_and_db, [{"group": "x"} for _ in range(5)])
+    docs = _page_all(app_and_db, size=2, sort_field="group")
+    ids = [d["_id"] for d in docs]
+    assert len(ids) == 5
+    assert len(set(ids)) == 5
+    assert ids == sorted(ids)
+
+
+def test_cursor_page_descending(app_and_db):
+    _seed(app_and_db, [{"n": i} for i in range(5)])
+    docs = _page_all(app_and_db, size=2, sort_field="n", direction=DESCENDING)
+    assert [d["n"] for d in docs] == [4, 3, 2, 1, 0]
+
+
+def test_cursor_page_respects_filter(app_and_db):
+    _seed(app_and_db, [{"n": i, "keep": i % 2 == 0} for i in range(6)])
+    docs = _page_all(app_and_db, size=2, sort_field="n", filter={"keep": True})
+    assert [d["n"] for d in docs] == [0, 2, 4]
+
+
+def test_cursor_page_supports_bson_sort_values(app_and_db):
+    base = datetime(2026, 1, 1)
+    _seed(app_and_db, [{"at": base + timedelta(days=i)} for i in range(4)])
+    docs = _page_all(app_and_db, size=2, sort_field="at")
+    assert [d["at"] for d in docs] == [base + timedelta(days=i) for i in range(4)]
+
+
+def test_cursor_page_last_page_has_no_cursor(app_and_db):
+    _seed(app_and_db, [{"n": i} for i in range(2)])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items, PageParams(size=5), sort_field="n"
+            )
+
+    page = asyncio.run(_run())
+    assert [d["n"] for d in page.items] == [0, 1]
+    assert page.next_cursor is None
+
+
+def test_cursor_page_rejects_bad_token(app_and_db):
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items, PageParams(cursor="garbage"), sort_field="n"
+            )
+
+    with pytest.raises(InvalidCursor):
+        asyncio.run(_run())
+
+
+def test_cursor_page_rejects_cursor_from_other_direction(app_and_db):
+    # A cursor records the direction it was issued with, so reusing it for a
+    # walk in the opposite direction is rejected rather than silently wrong.
+    _seed(app_and_db, [{"n": i} for i in range(6)])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            collection = client[database].items
+            page = await cursor_page(collection, PageParams(size=2), sort_field="n")
+            await cursor_page(
+                collection,
+                PageParams(cursor=page.next_cursor, size=2),
+                sort_field="n",
+                direction=DESCENDING,
+            )
+
+    with pytest.raises(InvalidCursor):
+        asyncio.run(_run())
+
+
+def test_cursor_page_exact_multiple_stops_cleanly(app_and_db):
+    _seed(app_and_db, [{"n": i} for i in range(6)])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            collection = client[database].items
+            first = await cursor_page(collection, PageParams(size=3), sort_field="n")
+            second = await cursor_page(
+                collection, PageParams(cursor=first.next_cursor, size=3), sort_field="n"
+            )
+            return first, second
+
+    first, second = asyncio.run(_run())
+    assert [d["n"] for d in first.items] == [0, 1, 2]
+    assert first.next_cursor is not None
+    assert [d["n"] for d in second.items] == [3, 4, 5]
+    assert second.next_cursor is None
+
+
+def test_cursor_page_empty_collection(app_and_db):
+    _seed(app_and_db, [])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items, PageParams(size=5), sort_field="n"
+            )
+
+    page = asyncio.run(_run())
+    assert page.items == []
+    assert page.next_cursor is None
+
+
+def test_cursor_page_handles_null_sort_values(app_and_db):
+    # Nulls sort first ascending; the walk must not stop at the null boundary.
+    _seed(app_and_db, [{"n": None}, {"n": 1}, {"n": None}, {"n": 2}])
+    docs = _page_all(app_and_db, size=1, sort_field="n")
+    assert [d["n"] for d in docs] == [None, None, 1, 2]
+
+
+def test_cursor_page_handles_missing_sort_field(app_and_db):
+    # Missing fields sort as null. Building the cursor used to raise KeyError.
+    _seed(app_and_db, [{"n": 2}, {"other": True}, {"n": 1}, {"other": True}])
+    docs = _page_all(app_and_db, size=1, sort_field="n")
+    assert [d.get("n") for d in docs] == [None, None, 1, 2]
+
+
+def test_cursor_page_descending_with_null_sort_values(app_and_db):
+    # Nulls sort last descending, so they are still reached after every value.
+    _seed(app_and_db, [{"n": None}, {"n": 1}, {"n": 3}])
+    docs = _page_all(app_and_db, size=1, sort_field="n", direction=DESCENDING)
+    assert [d["n"] for d in docs] == [3, 1, None]
+
+
+def test_cursor_page_supports_dotted_sort_field(app_and_db):
+    # A dotted path into an embedded document must resolve when the next
+    # cursor is built, or the walk repeats the first page forever.
+    _seed(app_and_db, [{"meta": {"rank": i}} for i in range(5)])
+    docs = _page_all(app_and_db, size=2, sort_field="meta.rank")
+    assert [d["meta"]["rank"] for d in docs] == [0, 1, 2, 3, 4]
+
+
+def test_cursor_page_descending_dotted_sort_field(app_and_db):
+    _seed(app_and_db, [{"meta": {"rank": i}} for i in range(4)])
+    docs = _page_all(app_and_db, size=2, sort_field="meta.rank", direction=DESCENDING)
+    assert [d["meta"]["rank"] for d in docs] == [3, 2, 1, 0]
+
+
+def test_cursor_page_accepts_id_plus_exclusion_projection(app_and_db):
+    # ``{"_id": 1, "secret": 0}`` is an exclusion projection (everything but
+    # ``secret``): the sort field still comes back whole, so it must be
+    # accepted rather than mistaken for an inclusion projection.
+    _seed(app_and_db, [{"n": i, "secret": "hidden"} for i in range(4)])
+    docs = _page_all(
+        app_and_db, size=2, sort_field="n", projection={"_id": 1, "secret": 0}
+    )
+    assert [d["n"] for d in docs] == [0, 1, 2, 3]
+    assert all("secret" not in d for d in docs)
+
+
+def test_cursor_page_rejects_operator_projection_on_sort_field(app_and_db):
+    # ``$slice`` is truthy but returns a truncated value, so the next cursor
+    # would be built from the wrong sort value; reject it up front.
+    _seed(app_and_db, [{"n": [i, i + 1]} for i in range(4)])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items,
+                PageParams(size=2),
+                sort_field="n",
+                projection={"n": {"$slice": 1}},
+            )
+
+    with pytest.raises(ValueError, match="projection must return"):
+        asyncio.run(_run())
+
+
+def test_cursor_page_rejects_sort_field_traversing_array(app_and_db):
+    # Sorting by ``"tags.rank"`` over an array of subdocuments orders by the
+    # array's minimum element, which the keyset seek cannot reproduce, so the
+    # walk is rejected rather than repeating the first page forever.
+    _seed(app_and_db, [{"tags": [{"rank": i}, {"rank": i + 10}]} for i in range(4)])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items, PageParams(size=2), sort_field="tags.rank"
+            )
+
+    with pytest.raises(ValueError, match="traverses an array"):
+        asyncio.run(_run())
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="keyset seek compares within one BSON type; see the pagination docs",
+)
+def test_cursor_page_mixed_sort_types_stop_early(app_and_db):
+    # Documents a known limitation: non-null sort values of different BSON
+    # types do not page correctly. If this starts passing, remove the xfail and
+    # the "one BSON type" caveat from the docs.
+    _seed(app_and_db, [{"n": 1}, {"n": "a"}, {"n": 2}])
+    docs = _page_all(app_and_db, size=1, sort_field="n")
+    assert len(docs) == 3
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="arrays sort by min element but the seek compares lexicographically; see the pagination docs",
+)
+def test_cursor_page_array_sort_values_duplicate(app_and_db):
+    # Documents a known limitation: MongoDB orders an array-valued sort field
+    # by its minimum element, while the seek compares arrays lexicographically,
+    # so the walk can repeat a document. If this starts passing, remove the
+    # xfail and the "array-valued sort fields" caveat from the docs.
+    _seed(app_and_db, [{"tags": [5, 1]}, {"tags": [2]}, {"tags": [3, 9]}])
+    docs = _page_all(app_and_db, size=2, sort_field="tags")
+    assert len(docs) == 3
+
+
+def test_cursor_page_sorts_by_subdocument_when_returned_whole(app_and_db):
+    # A subdocument sort field is compared field by field, so a projection that
+    # returns the whole subdoc pages correctly.
+    _seed(app_and_db, [{"meta": {"rank": i, "other": i}} for i in range(5)])
+    docs = _page_all(app_and_db, size=2, sort_field="meta", projection={"meta": 1})
+    assert [d["meta"]["rank"] for d in docs] == [0, 1, 2, 3, 4]
+
+
+def test_cursor_page_rejects_partial_subdocument_projection(app_and_db):
+    # Projecting only a child of the sort field returns a truncated subdoc,
+    # whose cursor would re-match rows (duplicates). It is rejected up front,
+    # before the query, so the collection is not touched.
+    _seed(app_and_db, [{"meta": {"rank": i, "other": i}} for i in range(5)])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            await cursor_page(
+                client[database].items,
+                PageParams(size=2),
+                sort_field="meta",
+                projection={"meta.rank": 1},
+            )
+
+    with pytest.raises(ValueError, match="projection must return"):
+        asyncio.run(_run())
