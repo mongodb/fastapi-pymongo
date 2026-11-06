@@ -3,9 +3,12 @@
 import asyncio
 import base64
 from datetime import datetime
+from uuid import uuid4
 
 import pytest
 from bson import BSON, Decimal128, ObjectId
+from bson.binary import UuidRepresentation
+from bson.codec_options import DEFAULT_CODEC_OPTIONS, CodecOptions
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pymongo import ASCENDING, DESCENDING
@@ -16,9 +19,22 @@ from fastapi_pymongo.pagination import (
     InvalidCursor,
     _decode_cursor,
     _encode_cursor,
+    _id_seek,
+    _keyset_query,
     _projection_returns_fully,
     _resolve_field,
 )
+
+
+class _StubCollection:
+    """Just enough of a collection for validation-only paths.
+
+    ``cursor_page`` reads ``codec_options`` before it queries, so tests that
+    exercise cursor decoding (and nothing else) can pass this instead of a
+    real collection.
+    """
+
+    codec_options = DEFAULT_CODEC_OPTIONS
 
 
 @pytest.mark.parametrize(
@@ -54,6 +70,24 @@ def test_cursor_round_trips_direction(direction):
 def test_cursor_token_is_url_safe():
     token = _encode_cursor(datetime(2026, 1, 1, 12, 0, 0), ObjectId(), ASCENDING)
     assert all(char.isalnum() or char in "-_" for char in token)
+
+
+def test_cursor_round_trips_uuid_with_codec_options():
+    # A collection with uuidRepresentation=standard returns uuid.UUID values;
+    # the token must encode and decode them with the collection's codec options.
+    options = CodecOptions(uuid_representation=UuidRepresentation.STANDARD)
+    sort_value = uuid4()
+    doc_id = uuid4()
+    token = _encode_cursor(sort_value, doc_id, ASCENDING, options)
+    assert _decode_cursor(token, options) == (sort_value, doc_id, ASCENDING)
+
+
+def test_cursor_encode_rejects_uuid_without_representation():
+    # The default codec options cannot encode a native UUID, which is why the
+    # collection's options are threaded through: without them, a UUID sort
+    # value or id fails the moment a next-page token is built.
+    with pytest.raises(ValueError):
+        _encode_cursor(uuid4(), ObjectId(), ASCENDING)
 
 
 def test_decode_rejects_garbage():
@@ -94,13 +128,14 @@ def test_invalid_cursor_is_a_400_http_exception():
 
 def test_invalid_cursor_returns_400_without_a_handler():
     # The library owns the 400: a route that lets InvalidCursor propagate needs
-    # no exception handler. A bad cursor raises before the collection is used,
-    # so None stands in for it.
+    # no exception handler. A bad cursor raises while decoding, before the
+    # collection is queried, so a stub that only carries codec options stands
+    # in for it.
     app = FastAPI()
 
     @app.get("/items")
     async def items(params: PageParams = Depends(page_params)):
-        return await cursor_page(None, params)
+        return await cursor_page(_StubCollection(), params)
 
     with TestClient(app) as client:
         response = client.get("/items", params={"cursor": "garbage"})
@@ -222,6 +257,20 @@ def test_cursor_page_accepts_projection_that_returns_cursor_fields(projection):
         # not keep the field whole.
         ({"n": {"$slice": 1}}, "n", False),
         ({"n": {"$elemMatch": {"x": 1}}}, "n", False),
+        # A standalone $slice is an exclusion projection: unrelated fields,
+        # including the sort field, still come back whole.
+        ({"comments": {"$slice": 3}}, "n", True),
+        ({"comments": {"$slice": 3}}, "comments", False),
+        ({"comments": {"$slice": 3}, "n": 1}, "n", True),
+        ({"comments": {"$slice": 3}, "n": 1}, "comments", False),
+        # A string value is an expression that replaces the field, not a flag.
+        ({"n": "$other"}, "n", False),
+        # A truthy non-1 scalar is still an inclusion flag.
+        ({"n": 2}, "n", True),
+        # _id is truncated by a descendant projection or a computed value.
+        ({"_id.part": 0}, "_id", False),
+        ({"_id.part": 1}, "_id", False),
+        ({"_id": {"$toString": "$_id"}}, "_id", False),
     ],
 )
 def test_projection_returns_fully(projection, field, expected):
@@ -254,6 +303,44 @@ def test_resolve_field_rejects_array_traversal():
     # silently building a cursor that repeats the page forever.
     with pytest.raises(ValueError, match="traverses an array"):
         _resolve_field({"tags": [{"rank": 1}, {"rank": 2}]}, "tags.rank")
+
+
+# --- _id_seek / _keyset_query: the seek predicate, including nulls ---
+
+
+def test_id_seek_non_null_uses_range_comparison():
+    oid = ObjectId()
+    assert _id_seek(ASCENDING, oid) == {"_id": {"$gt": oid}}
+    assert _id_seek(DESCENDING, oid) == {"_id": {"$lt": oid}}
+
+
+def test_id_seek_ascending_null_id_follows_with_non_null_ids():
+    # _id is unique, so a null _id sorts first ascending and every non-null id
+    # follows; a bare ``$gt: null`` would match nothing and drop those rows.
+    assert _id_seek(ASCENDING, None) == {"_id": {"$ne": None}}
+
+
+def test_id_seek_descending_null_id_matches_nothing():
+    # Null sorts last descending, so nothing follows the null _id.
+    assert _id_seek(DESCENDING, None) == {"_id": {"$lt": None}}
+
+
+def test_keyset_query_wraps_sort_value_in_eq():
+    # The sort value is client-supplied BSON. Shorthand equality would run a
+    # value shaped like ``{"$regex": ...}`` as a query operator instead of
+    # comparing it literally, so it must be wrapped in $eq.
+    oid = ObjectId()
+    query = _keyset_query({}, "n", ASCENDING, {"$regex": "x"}, oid)
+    assert {"$and": [{"n": {"$eq": {"$regex": "x"}}}, {"_id": {"$gt": oid}}]} in query["$or"]
+
+
+def test_keyset_query_null_id_tiebreaker_ascending():
+    query = _keyset_query({}, "n", ASCENDING, 5, None)
+    assert {"$and": [{"n": {"$eq": 5}}, {"_id": {"$ne": None}}]} in query["$or"]
+
+
+def test_keyset_query_default_id_sort_ascending_null_id():
+    assert _keyset_query({}, "_id", ASCENDING, None, None) == {"_id": {"$ne": None}}
 
 
 # --- page_params dependency, exercised through a real FastAPI app ---

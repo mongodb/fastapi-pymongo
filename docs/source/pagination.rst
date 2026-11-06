@@ -156,15 +156,20 @@ What this does not do
   is sensitive.
 - **Not signed.** The token is opaque but not tamper-proof: a client can
   forge one. It only affects which slice of data comes back, so that is
-  usually acceptable; sign or encrypt it yourself if it is not.
+  usually acceptable; sign or encrypt it yourself if it is not. A forged
+  value is still compared literally — a sort value shaped like a query
+  operator (``{"$regex": ...}``) is matched as a value, never executed.
 - **Projections must return ``sort_field`` and ``_id`` in full.**
   ``cursor_page`` raises :exc:`ValueError` if a projection drops either, or
   returns only part of ``sort_field``. Dropping ``_id`` would make the next
   cursor impossible to build; a missing or truncated ``sort_field`` would build
   a cursor that is silently wrong, so both are rejected up front. A
   subdocument ``sort_field`` must come back whole — projecting a child path
-  such as ``{"meta.rank": 1}`` while sorting by ``"meta"`` is rejected.
-  Projection operators that truncate a field (``{"n": {"$slice": 1}}``,
-  ``$elemMatch``) are rejected too. Note that ``_id`` may appear in either
-  projection form, so ``{"_id": 1, "secret": 0}`` is treated as an exclusion
-  projection and accepted.
+  such as ``{"meta.rank": 1}`` while sorting by ``"meta"`` is rejected, as is
+  a projection operator that truncates the field (``{"n": {"$slice": 1}}``,
+  ``$elemMatch``) or an expression that replaces it (``{"n": "$other"}``).
+  ``_id`` may appear in either projection form, so ``{"_id": 1, "secret": 0}``
+  is treated as an exclusion projection and accepted; a projected descendant
+  (``{"_id.part": 0}``) or a computed ``_id`` is rejected. A standalone
+  ``$slice`` on an unrelated field is an exclusion projection, so it is
+  accepted.

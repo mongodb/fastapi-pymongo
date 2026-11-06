@@ -10,10 +10,12 @@ from uuid import uuid4
 
 import pytest
 from bson import ObjectId
+from bson.binary import UuidRepresentation
+from bson.codec_options import CodecOptions
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, Field
-from pymongo import DESCENDING, AsyncMongoClient
+from pymongo import ASCENDING, DESCENDING, AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
 from fastapi_pymongo import (
@@ -26,6 +28,7 @@ from fastapi_pymongo import (
     mongo_lifespan,
 )
 from fastapi_pymongo.lifespan import get_database
+from fastapi_pymongo.pagination import _encode_cursor
 
 pytestmark = pytest.mark.integration
 
@@ -399,6 +402,115 @@ def test_cursor_page_rejects_sort_field_traversing_array(app_and_db):
 
     with pytest.raises(ValueError, match="traverses an array"):
         asyncio.run(_run())
+
+
+def test_cursor_page_rejects_array_sort_field_off_the_page_boundary(app_and_db):
+    # The array document sorts first (min element 1), so each page ends on a
+    # scalar document. Validation must not depend on the array document being
+    # the boundary, or it slips through and the ordering is silently wrong.
+    _seed(
+        app_and_db,
+        [
+            {"tags": [{"rank": 1}, {"rank": 10}]},
+            {"tags": {"rank": 2}},
+            {"tags": {"rank": 3}},
+            {"tags": {"rank": 4}},
+        ],
+    )
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items, PageParams(size=2), sort_field="tags.rank"
+            )
+
+    with pytest.raises(ValueError, match="traverses an array"):
+        asyncio.run(_run())
+
+
+def test_cursor_page_accepts_slice_projection_on_unrelated_field(app_and_db):
+    # A standalone $slice is an exclusion projection: unrelated fields,
+    # including the sort field, still come back whole, so it must be accepted.
+    _seed(app_and_db, [{"n": i, "comments": [i, i + 1, i + 2]} for i in range(4)])
+    docs = _page_all(
+        app_and_db,
+        size=2,
+        sort_field="n",
+        projection={"comments": {"$slice": 1}},
+    )
+    assert [d["n"] for d in docs] == [0, 1, 2, 3]
+
+
+def test_cursor_page_handles_null_id(app_and_db):
+    # _id may be null (at most one document). With equal sort values, an
+    # ascending walk must not drop the rows that follow the null _id.
+    _seed(
+        app_and_db,
+        [{"_id": None, "n": 1}, {"_id": ObjectId(), "n": 1}, {"_id": ObjectId(), "n": 1}],
+    )
+    docs = _page_all(app_and_db, size=1, sort_field="n")
+    assert len(docs) == 3
+    assert len({d["_id"] for d in docs}) == 3
+
+
+def test_cursor_page_default_id_sort_handles_null_id(app_and_db):
+    # The same null-_id case on the default _id sort, where _id is the sort
+    # field as well as the tiebreaker.
+    _seed(app_and_db, [{"_id": None, "n": 0}, {"_id": ObjectId(), "n": 1}])
+    docs = _page_all(app_and_db, size=1)
+    assert len(docs) == 2
+
+
+def test_cursor_page_does_not_run_forged_sort_value_as_operator(app_and_db):
+    # A forged cursor value shaped like a query operator must be compared
+    # literally, not executed as a predicate.
+    _seed(app_and_db, [{"n": "aaa"}, {"n": "bbb"}])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+    forged = _encode_cursor(
+        {"$regex": "a"}, ObjectId("000000000000000000000000"), ASCENDING
+    )
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items,
+                PageParams(cursor=forged, size=5),
+                sort_field="n",
+            )
+
+    assert asyncio.run(_run()).items == []
+
+
+def test_cursor_page_supports_uuid_sort_values(app_and_db):
+    # A collection with uuidRepresentation=standard returns uuid.UUID values;
+    # the token must encode them with the collection's codec options or the
+    # walk fails as soon as a next-page token is built.
+    _, database = app_and_db
+    uri = MongoSettings().uri
+    options = CodecOptions(uuid_representation=UuidRepresentation.STANDARD)
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            collection = client[database].get_collection(
+                "uuid_items", codec_options=options
+            )
+            await collection.delete_many({})
+            await collection.insert_many([{"n": i, "u": uuid4()} for i in range(4)])
+            seen = []
+            params = PageParams(size=2)
+            while True:
+                page = await cursor_page(collection, params, sort_field="u")
+                seen.extend(d["u"] for d in page.items)
+                if page.next_cursor is None:
+                    return seen
+                params = PageParams(cursor=page.next_cursor, size=2)
+
+    seen = asyncio.run(_run())
+    assert len(seen) == 4
+    assert len(set(seen)) == 4
 
 
 @pytest.mark.xfail(
