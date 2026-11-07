@@ -356,8 +356,7 @@ def test_cursor_page_descending_dotted_sort_field(app_and_db):
 
 def test_cursor_page_accepts_id_plus_exclusion_projection(app_and_db):
     # ``{"_id": 1, "secret": 0}`` is an exclusion projection (everything but
-    # ``secret``): the sort field still comes back whole, so it must be
-    # accepted rather than mistaken for an inclusion projection.
+    # ``secret``); the sort field still comes back whole, so accept it.
     _seed(app_and_db, [{"n": i, "secret": "hidden"} for i in range(4)])
     docs = _page_all(
         app_and_db, size=2, sort_field="n", projection={"_id": 1, "secret": 0}
@@ -387,9 +386,8 @@ def test_cursor_page_rejects_operator_projection_on_sort_field(app_and_db):
 
 
 def test_cursor_page_rejects_sort_field_traversing_array(app_and_db):
-    # Sorting by ``"tags.rank"`` over an array of subdocuments orders by the
-    # array's minimum element, which the keyset seek cannot reproduce, so the
-    # walk is rejected rather than repeating the first page forever.
+    # Sorting by ``"tags.rank"`` over an array orders by the array's minimum
+    # element, which the seek cannot reproduce, so the walk is rejected.
     _seed(app_and_db, [{"tags": [{"rank": i}, {"rank": i + 10}]} for i in range(4)])
     _, database = app_and_db
     uri = MongoSettings().uri
@@ -405,9 +403,8 @@ def test_cursor_page_rejects_sort_field_traversing_array(app_and_db):
 
 
 def test_cursor_page_rejects_array_sort_field_off_the_page_boundary(app_and_db):
-    # The array document sorts first (min element 1), so each page ends on a
-    # scalar document. Validation must not depend on the array document being
-    # the boundary, or it slips through and the ordering is silently wrong.
+    # The array document sorts first, so each page ends on a scalar. Validation
+    # must cover every document, not just the boundary.
     _seed(
         app_and_db,
         [
@@ -464,9 +461,8 @@ def test_cursor_page_default_id_sort_handles_null_id(app_and_db):
 
 
 def test_cursor_page_descending_handles_null_id_tiebreaker(app_and_db):
-    # Descending, the null _id sorts last in its tie group, and range
-    # comparisons are type-bracketed, so the seek must add it explicitly or the
-    # walk stops before reaching it.
+    # Descending, the null _id sorts last in its group; range comparisons are
+    # type-bracketed, so the seek must add it explicitly.
     _seed(
         app_and_db,
         [{"_id": None, "n": 1}, {"_id": ObjectId(), "n": 1}, {"_id": ObjectId(), "n": 1}],
@@ -485,7 +481,7 @@ def test_cursor_page_default_id_sort_descending_handles_null_id(app_and_db):
 
 def test_cursor_page_rejects_numeric_string_projection(app_and_db):
     # A numeric string is an expression that replaces the stored value, so it
-    # must not be accepted as returning the sort field in full.
+    # must not count as returning the sort field.
     _seed(app_and_db, [{"n": i} for i in range(4)])
     _, database = app_and_db
     uri = MongoSettings().uri
@@ -504,8 +500,8 @@ def test_cursor_page_rejects_numeric_string_projection(app_and_db):
 
 
 def test_cursor_page_accepts_sort_field_nested_under_included_id(app_and_db):
-    # Sorting by a field inside a document-valued _id: {"_id": 1} returns _id
-    # whole, so the nested sort field is present and the projection is valid.
+    # {"_id": 1} returns a document-valued _id whole, so a sort field nested
+    # under it is present and the projection is valid.
     _seed(app_and_db, [{"_id": {"rank": i}, "n": i} for i in range(4)])
     docs = _page_all(
         app_and_db, size=2, sort_field="_id.rank", projection={"_id": 1}

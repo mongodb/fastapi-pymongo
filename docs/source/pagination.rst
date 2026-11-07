@@ -160,16 +160,9 @@ What this does not do
   value is still compared literally — a sort value shaped like a query
   operator (``{"$regex": ...}``) is matched as a value, never executed.
 - **Projections must return ``sort_field`` and ``_id`` in full.**
-  ``cursor_page`` raises :exc:`ValueError` if a projection drops either, or
-  returns only part of ``sort_field``. Dropping ``_id`` would make the next
-  cursor impossible to build; a missing or truncated ``sort_field`` would build
-  a cursor that is silently wrong, so both are rejected up front. A
-  subdocument ``sort_field`` must come back whole — projecting a child path
-  such as ``{"meta.rank": 1}`` while sorting by ``"meta"`` is rejected, as is
-  a projection operator that truncates the field (``{"n": {"$slice": 1}}``,
-  ``$elemMatch``) or an expression that replaces it (``{"n": "$other"}``).
-  ``_id`` may appear in either projection form, so ``{"_id": 1, "secret": 0}``
-  is treated as an exclusion projection and accepted; a projected descendant
-  (``{"_id.part": 0}``) or a computed ``_id`` is rejected. A standalone
-  ``$slice`` on an unrelated field is an exclusion projection, so it is
-  accepted.
+  ``cursor_page`` raises :exc:`ValueError` otherwise, since a missing or partial
+  value builds a silently wrong cursor. That includes a child path of a
+  subdocument field, an operator that truncates it (``$slice``, ``$elemMatch``),
+  an expression that replaces it (``{"n": "$other"}``), and a descendant or
+  computed ``_id``. An exclusion projection is fine: ``{"_id": 1, "secret": 0}``
+  and a standalone ``$slice`` on an unrelated field are both accepted.

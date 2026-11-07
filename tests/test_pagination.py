@@ -73,8 +73,8 @@ def test_cursor_token_is_url_safe():
 
 
 def test_cursor_round_trips_uuid_with_codec_options():
-    # A collection with uuidRepresentation=standard returns uuid.UUID values;
-    # the token must encode and decode them with the collection's codec options.
+    # uuidRepresentation=standard returns uuid.UUID values; the token must
+    # round-trip them with the collection's codec options.
     options = CodecOptions(uuid_representation=UuidRepresentation.STANDARD)
     sort_value = uuid4()
     doc_id = uuid4()
@@ -84,8 +84,7 @@ def test_cursor_round_trips_uuid_with_codec_options():
 
 def test_cursor_encode_rejects_uuid_without_representation():
     # The default codec options cannot encode a native UUID, which is why the
-    # collection's options are threaded through: without them, a UUID sort
-    # value or id fails the moment a next-page token is built.
+    # collection's options are threaded through.
     with pytest.raises(ValueError):
         _encode_cursor(uuid4(), ObjectId(), ASCENDING)
 
@@ -127,10 +126,8 @@ def test_invalid_cursor_is_a_400_http_exception():
 
 
 def test_invalid_cursor_returns_400_without_a_handler():
-    # The library owns the 400: a route that lets InvalidCursor propagate needs
-    # no exception handler. A bad cursor raises while decoding, before the
-    # collection is queried, so a stub that only carries codec options stands
-    # in for it.
+    # A bad cursor raises while decoding, before the collection is queried, so
+    # a stub carrying only codec options stands in for it.
     app = FastAPI()
 
     @app.get("/items")
@@ -310,9 +307,8 @@ def test_resolve_field(document, path, expected):
 
 
 def test_resolve_field_rejects_array_traversal():
-    # A named segment crossing an array is ordered by the array's minimum
-    # element, which the seek cannot reproduce, so it is rejected rather than
-    # silently building a cursor that repeats the page forever.
+    # A named segment crossing an array is ordered by its minimum element, which
+    # the seek cannot reproduce, so it is rejected.
     with pytest.raises(ValueError, match="traverses an array"):
         _resolve_field({"tags": [{"rank": 1}, {"rank": 2}]}, "tags.rank")
 
@@ -329,8 +325,8 @@ def test_id_seek_non_null():
 
 
 def test_id_seek_ascending_null_id_follows_with_non_null_ids():
-    # _id is unique, so a null _id sorts first ascending and every non-null id
-    # follows; a bare ``$gt: null`` would match nothing and drop those rows.
+    # A null _id sorts first ascending; a bare ``$gt: null`` would match nothing
+    # and drop the rows after it.
     assert _id_seek(ASCENDING, None) == {"_id": {"$ne": None}}
 
 
@@ -340,9 +336,8 @@ def test_id_seek_descending_null_id_matches_nothing():
 
 
 def test_keyset_query_wraps_sort_value_in_eq():
-    # The sort value is client-supplied BSON. Shorthand equality would run a
-    # value shaped like ``{"$regex": ...}`` as a query operator instead of
-    # comparing it literally, so it must be wrapped in $eq.
+    # The sort value is client-supplied BSON; shorthand equality would run
+    # ``{"$regex": ...}`` as a predicate, so it must be wrapped in $eq.
     oid = ObjectId()
     query = _keyset_query({}, "n", ASCENDING, {"$regex": "x"}, oid)
     assert {"$and": [{"n": {"$eq": {"$regex": "x"}}}, {"_id": {"$gt": oid}}]} in query["$or"]

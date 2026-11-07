@@ -28,11 +28,9 @@ _BASE64_GROUP_SIZE = 4
 class InvalidCursor(HTTPException):
     """Raised when a cursor token cannot be used for the request.
 
-    That covers a token this library did not produce and one it did produce
-    but issued for a different sort direction. It is an
-    :class:`fastapi.HTTPException` with status ``400``, so a route that lets
-    it propagate returns a 400 without any handler. Register one only to
-    customize the response; see :doc:`/pagination`.
+    Covers a token this library did not produce and one issued for a different
+    sort direction. It is a :class:`fastapi.HTTPException` with status ``400``,
+    so a route that lets it propagate needs no handler (see :doc:`/pagination`).
     """
 
     def __init__(self, detail: str = "Invalid cursor") -> None:
@@ -71,13 +69,11 @@ def _encode_cursor(
     direction: int,
     codec_options: CodecOptions[Any] = DEFAULT_CODEC_OPTIONS,
 ) -> str:
-    """Encode a ``(sort_value, _id, direction)`` triple as an opaque, URL-safe token.
+    """Encode ``(sort_value, _id, direction)`` as an opaque, URL-safe token.
 
-    The payload is BSON-encoded, so any value MongoDB can store round-trips
-    (``ObjectId``, ``datetime``, ``Decimal128``, embedded documents, ...).
-    ``codec_options`` are the source collection's, so values whose encoding
-    depends on them (notably ``uuid.UUID`` under ``uuidRepresentation``)
-    encode the same way they were read.
+    The payload is BSON, so any storable value round-trips. ``codec_options``
+    are the collection's, so codec-dependent values (e.g. ``uuid.UUID``) encode
+    as they were read.
     """
     payload = BSON.encode(
         {"sort_value": sort_value, "_id": doc_id, "direction": direction},
@@ -90,9 +86,7 @@ def _decode_cursor(
     token: str,
     codec_options: CodecOptions[Any] = DEFAULT_CODEC_OPTIONS,
 ) -> tuple[Any, Any, int]:
-    """Decode a token produced by :func:`_encode_cursor`.
-
-    Returns ``(sort_value, doc_id, direction)``.
+    """Decode a token into ``(sort_value, doc_id, direction)``.
 
     :raises InvalidCursor: if the token is malformed.
     """
@@ -131,15 +125,13 @@ def page_params(
 
 
 def _resolve_field(document: Mapping[str, Any], path: str) -> Any:
-    """Return the value at a dotted ``path`` within ``document``.
+    """Return the value at dotted ``path`` in ``document``, or ``None``.
 
-    MongoDB treats a missing field as null, so an unresolvable path (a missing
-    key, a non-mapping at an intermediate step, or an out-of-range array index)
-    returns ``None``. A plain field name is the single-segment case.
+    A missing key, a non-mapping intermediate, or an out-of-range index resolves
+    to ``None`` (MongoDB treats a missing field as null).
 
-    :raises ValueError: if ``path`` traverses an array by name. MongoDB orders
-        such a field by the minimum element of the array, which the keyset seek
-        cannot reproduce, so it is rejected rather than paged incorrectly.
+    :raises ValueError: if ``path`` crosses an array by name, whose min-element
+        ordering the keyset seek cannot reproduce.
     """
     value: Any = document
     for part in path.split("."):
@@ -153,9 +145,8 @@ def _resolve_field(document: Mapping[str, Any], path: str) -> Any:
                 return None
             value = value[index]
         elif isinstance(value, list):
-            # A named segment crossing an array: MongoDB resolves it against
-            # every element and sorts by the minimum, so the value here is not
-            # the one the server ordered by.
+            # A named segment crossing an array: MongoDB sorts by the array's
+            # minimum, not this value.
             raise ValueError(
                 f"sort field {path!r} traverses an array; array-valued sort "
                 "fields are not supported"
@@ -168,12 +159,9 @@ def _resolve_field(document: Mapping[str, Any], path: str) -> Any:
 def _is_whole_field_flag(value: Any) -> bool:
     """Return whether a projection entry includes its field in full.
 
-    Only a truthy scalar (``1``, ``true``, or another non-zero number) is an
-    inclusion flag. Everything else — a falsy scalar, an operator such as
-    ``$slice`` or ``$elemMatch``, or any string — does not return the stored
-    field. A string value is an expression: MongoDB replaces the field with the
-    string's value (``{"n": "1"}`` sets ``n`` to ``"1"``) rather than including
-    it, even when the string looks numeric.
+    Only a truthy scalar (``1``, ``true``, a non-zero number) is an inclusion
+    flag. A string is an expression that replaces the field (``{"n": "1"}``
+    sets ``n`` to ``"1"``), and an operator or falsy value does not include it.
     """
     if isinstance(value, (Mapping, str)):
         return False
@@ -181,11 +169,10 @@ def _is_whole_field_flag(value: Any) -> bool:
 
 
 def _is_inclusion_entry(value: Any) -> bool:
-    """Return whether a projection entry puts the projection in inclusion mode.
+    """Return whether a projection entry selects inclusion mode.
 
-    Inclusion flags, expressions (any string), and operators other than
-    ``$slice`` (``$elemMatch``, ``$meta``) are inclusion; exclude flags and a
-    standalone ``$slice`` are exclusion.
+    Include flags, expressions (any string), and operators other than ``$slice``
+    are inclusion; exclude flags and a standalone ``$slice`` are exclusion.
     """
     if isinstance(value, Mapping):
         return "$slice" not in value
@@ -197,25 +184,15 @@ def _is_inclusion_entry(value: Any) -> bool:
 def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) -> bool:
     """Return whether ``projection`` returns ``field`` in full.
 
-    This is stricter than a presence check: a subdocument sort field must come
-    back whole for its cursor value to be correct, so projecting (or excluding)
-    only a child path is not enough.
+    A field is whole only if its whole value comes back: an inclusion projection
+    must include it (or an ancestor) with a flag (``{"meta": 1}`` keeps
+    ``meta.rank`` whole; ``{"meta.rank": 1}`` does not keep ``meta``), and an
+    exclusion projection must not exclude or ``$slice`` anything overlapping it.
+    ``_id`` is included by default, so it and any field nested under it are whole
+    unless the ``_id`` subtree is excluded, computed, or truncated.
 
-    Handles both MongoDB projection forms. An inclusion projection returns only
-    the listed paths, plus ``_id`` unless it is explicitly excluded; a field is
-    returned whole when it, or an ancestor, is included with a flag
-    (``{"meta": 1}`` keeps ``meta.rank`` whole; ``{"meta.rank": 1}`` does not
-    keep ``meta`` whole, and an operator or expression never keeps a field
-    whole). An exclusion projection returns everything except the falsy paths
-    and any ``$slice``, so a field is whole only when nothing overlapping it is
-    excluded or sliced. ``_id`` is included whole by default, so it — and any
-    sort field nested under it — is whole unless the ``_id`` subtree is
-    excluded, computed, or truncated by a descendant projection.
-
-    The projection form is decided by the fields other than ``_id``, because
-    ``_id`` may appear in either form: ``{"_id": 1, "secret": 0}`` is an
-    exclusion projection (everything but ``secret``), not an inclusion one.
-    Only when ``_id`` is the sole entry does its own value pick the form.
+    The form is decided by the fields other than ``_id`` (which may appear in
+    either): ``{"_id": 1, "secret": 0}`` is an exclusion projection.
     """
     if projection is None:
         return True
@@ -225,10 +202,9 @@ def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) 
         if others
         else _is_inclusion_entry(projection.get(_ID, 0))
     )
-    # ``_id`` is included whole by default, so a sort field nested under it
-    # (``"_id.rank"``) is present unless the projection says otherwise. Model
-    # that as an implicit ``{"_id": 1}`` entry, unless the projection already
-    # touches the ``_id`` subtree (``_id`` itself or a descendant).
+    # ``_id`` is included whole by default, so a field nested under it is
+    # present unless the projection touches the ``_id`` subtree; model that with
+    # an implicit ``{"_id": 1}``.
     paths = projection
     if not any(path == _ID or path.startswith(f"{_ID}.") for path in projection):
         paths = {**projection, _ID: 1}
@@ -251,10 +227,8 @@ def _id_seek(direction: int, last_id: Any) -> dict[str, Any]:
     """Build the ``_id`` tiebreaker seek past ``last_id``.
 
     ``_id`` is unique, so at most one document has a null ``_id``. Range
-    comparisons are type-bracketed, so a plain ``$gt``/``$lt`` never matches the
-    null id: ascending it sorts first (so every non-null id follows), descending
-    it sorts last (so it must be added explicitly when seeking down from a
-    non-null id).
+    comparisons are type-bracketed and never match it: ascending it sorts first
+    (all non-null ids follow), descending it sorts last (so add it explicitly).
     """
     if last_id is None:
         if direction == ASCENDING:
@@ -278,9 +252,8 @@ def _keyset_query(
     if sort_field == _ID:
         seek: dict[str, Any] = _id_seek(direction, last_id)
     elif last_value is None:
-        # Null and missing sort lowest in BSON order, and are handled
-        # explicitly because ``{field: {"$gt": None}}`` matches nothing:
-        # $gt/$lt only compare within a single BSON type.
+        # Nulls sort lowest, and ``{field: {"$gt": None}}`` matches nothing, so
+        # handle them explicitly (range comparisons are type-bracketed).
         if direction == ASCENDING:
             # Every non-null value sorts after all the nulls.
             seek = {
@@ -293,10 +266,8 @@ def _keyset_query(
             # Nulls sort last, so only later nulls remain.
             seek = {"$and": [{sort_field: None}, _id_seek(direction, last_id)]}
     else:
-        # Seek past the last sort value, and use _id to break ties when the
-        # sort field repeats (keyset pagination needs a total order). The value
-        # is wrapped in $eq so a cursor value like ``{"$regex": ...}`` is
-        # compared literally instead of being run as a query operator.
+        # Seek past the last sort value, tie-broken on _id (a total order). $eq
+        # keeps a cursor value like ``{"$regex": ...}`` literal, not a predicate.
         branches: list[dict[str, Any]] = [
             {sort_field: {operator: last_value}},
             {"$and": [{sort_field: {"$eq": last_value}}, _id_seek(direction, last_id)]},
@@ -322,19 +293,16 @@ async def cursor_page(
     """Fetch one keyset-paginated page from ``collection``.
 
     Documents are ordered by ``sort_field``, breaking ties on ``_id`` (so just
-    ``_id`` when ``sort_field`` is ``_id``). Equal sort values therefore still
-    have a stable, total order. To read the next page, pass the returned
-    ``next_cursor`` back as ``PageParams.cursor``; when ``next_cursor`` is
-    ``None`` you have reached the end.
+    ``_id`` when ``sort_field`` is ``_id``), giving a stable total order. To read
+    the next page, pass ``next_cursor`` back as ``PageParams.cursor``; ``None``
+    means the end.
 
-    The token records the sort direction it was issued with, so a cursor from
-    a walk in one direction is rejected if reused with the other.
+    The token records its sort direction, so a cursor from one direction is
+    rejected if reused with the other.
 
-    Null and missing sort values are handled, so a sort field that is only
-    sometimes present still pages correctly, and a null ``_id`` (which at most
-    one document may have) is handled in the tiebreaker. Non-null sort values,
-    however, must share one BSON type: the seek uses ``$gt``/``$lt``, which do
-    not compare across BSON types.
+    Null and missing sort values page correctly, as does a null ``_id``.
+    Non-null sort values must share one BSON type: the seek's ``$gt``/``$lt`` do
+    not compare across types.
 
     :param collection: the PyMongo async collection to read from.
     :param params: the page cursor and size, usually from :func:`page_params`.
@@ -344,16 +312,14 @@ async def cursor_page(
     :param direction: ``pymongo.ASCENDING`` (default) or
         ``pymongo.DESCENDING``.
     :param filter: an optional MongoDB query, passed through unchanged.
-    :param projection: an optional projection. It must return ``sort_field``
-        and ``_id`` in full, or the next cursor cannot be built and
-        :exc:`ValueError` is raised. A ``sort_field`` that is a subdocument
-        must come back whole, so projecting only part of it is rejected.
+    :param projection: an optional projection. It must return ``sort_field`` and
+        ``_id`` in full (a subdocument ``sort_field`` must come back whole), or
+        :exc:`ValueError` is raised.
     :raises InvalidCursor: if ``params.cursor`` is malformed, or was issued
         for a different sort direction.
-    :raises ValueError: if ``direction`` is not one of the two PyMongo sort
-        constants, ``params.size`` is less than 1, ``projection`` does not
-        return ``sort_field`` or ``_id`` in full, or ``sort_field`` traverses
-        an array.
+    :raises ValueError: if ``direction`` is invalid, ``params.size`` is below 1,
+        ``projection`` does not return ``sort_field`` or ``_id`` in full, or
+        ``sort_field`` traverses an array.
     """
     if (
         not isinstance(direction, int)
@@ -378,7 +344,9 @@ async def cursor_page(
     query: dict[str, Any] = dict(filter) if filter else {}
     codec_options = collection.codec_options
     if params.cursor is not None:
-        last_value, last_id, cursor_direction = _decode_cursor(params.cursor, codec_options)
+        last_value, last_id, cursor_direction = _decode_cursor(
+            params.cursor, codec_options
+        )
         if cursor_direction != direction:
             raise InvalidCursor("cursor was issued for a different sort direction")
         query = _keyset_query(query, sort_field, direction, last_value, last_id)
@@ -394,10 +362,9 @@ async def cursor_page(
 
     has_more = len(documents) > params.size
     items = documents[: params.size]
-    # Resolve the sort value for every returned document, not just the one used
-    # to build the cursor: an array traversal anywhere in the page makes the
-    # ordering unreproducible, so it must raise regardless of where it lands.
-    # A document may be missing the sort field, which MongoDB orders as null.
+    # Resolve every returned document, not just the cursor's: an array traversal
+    # anywhere makes the ordering unreproducible, so it must raise wherever it
+    # lands. A missing sort field resolves to null, which MongoDB orders as null.
     resolved = [_resolve_field(document, sort_field) for document in items]
     next_cursor = None
     if has_more and items:
