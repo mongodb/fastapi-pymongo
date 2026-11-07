@@ -463,6 +463,56 @@ def test_cursor_page_default_id_sort_handles_null_id(app_and_db):
     assert len(docs) == 2
 
 
+def test_cursor_page_descending_handles_null_id_tiebreaker(app_and_db):
+    # Descending, the null _id sorts last in its tie group, and range
+    # comparisons are type-bracketed, so the seek must add it explicitly or the
+    # walk stops before reaching it.
+    _seed(
+        app_and_db,
+        [{"_id": None, "n": 1}, {"_id": ObjectId(), "n": 1}, {"_id": ObjectId(), "n": 1}],
+    )
+    docs = _page_all(app_and_db, size=1, sort_field="n", direction=DESCENDING)
+    assert len(docs) == 3
+    assert len({d["_id"] for d in docs}) == 3
+
+
+def test_cursor_page_default_id_sort_descending_handles_null_id(app_and_db):
+    # Same descending null-_id case on the default _id sort.
+    _seed(app_and_db, [{"_id": None, "n": 0}, {"_id": ObjectId(), "n": 1}])
+    docs = _page_all(app_and_db, size=1, direction=DESCENDING)
+    assert len(docs) == 2
+
+
+def test_cursor_page_rejects_numeric_string_projection(app_and_db):
+    # A numeric string is an expression that replaces the stored value, so it
+    # must not be accepted as returning the sort field in full.
+    _seed(app_and_db, [{"n": i} for i in range(4)])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items,
+                PageParams(size=2),
+                sort_field="n",
+                projection={"n": "1"},
+            )
+
+    with pytest.raises(ValueError, match="projection must return"):
+        asyncio.run(_run())
+
+
+def test_cursor_page_accepts_sort_field_nested_under_included_id(app_and_db):
+    # Sorting by a field inside a document-valued _id: {"_id": 1} returns _id
+    # whole, so the nested sort field is present and the projection is valid.
+    _seed(app_and_db, [{"_id": {"rank": i}, "n": i} for i in range(4)])
+    docs = _page_all(
+        app_and_db, size=2, sort_field="_id.rank", projection={"_id": 1}
+    )
+    assert [d["_id"]["rank"] for d in docs] == [0, 1, 2, 3]
+
+
 def test_cursor_page_does_not_run_forged_sort_value_as_operator(app_and_db):
     # A forged cursor value shaped like a query operator must be compared
     # literally, not executed as a predicate.

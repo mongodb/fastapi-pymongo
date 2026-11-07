@@ -168,37 +168,29 @@ def _resolve_field(document: Mapping[str, Any], path: str) -> Any:
 def _is_whole_field_flag(value: Any) -> bool:
     """Return whether a projection entry includes its field in full.
 
-    A truthy scalar (``1``, ``true``, or a numeric string) is an inclusion
-    flag. Anything else — a falsy scalar, an operator such as ``$slice`` or
-    ``$elemMatch``, or an aggregation-style expression like ``"$other"`` —
-    does not return the field whole.
+    Only a truthy scalar (``1``, ``true``, or another non-zero number) is an
+    inclusion flag. Everything else — a falsy scalar, an operator such as
+    ``$slice`` or ``$elemMatch``, or any string — does not return the stored
+    field. A string value is an expression: MongoDB replaces the field with the
+    string's value (``{"n": "1"}`` sets ``n`` to ``"1"``) rather than including
+    it, even when the string looks numeric.
     """
-    if isinstance(value, Mapping):
+    if isinstance(value, (Mapping, str)):
         return False
-    if isinstance(value, str):
-        # MongoDB parses numeric strings as flags; other strings are
-        # expressions that replace the field rather than returning it.
-        try:
-            return float(value) != 0
-        except ValueError:
-            return False
     return bool(value)
 
 
 def _is_inclusion_entry(value: Any) -> bool:
     """Return whether a projection entry puts the projection in inclusion mode.
 
-    Inclusion flags and operators other than ``$slice`` (``$elemMatch``,
-    ``$meta``, expressions) are inclusion; exclude flags and a standalone
-    ``$slice`` are exclusion.
+    Inclusion flags, expressions (any string), and operators other than
+    ``$slice`` (``$elemMatch``, ``$meta``) are inclusion; exclude flags and a
+    standalone ``$slice`` are exclusion.
     """
     if isinstance(value, Mapping):
         return "$slice" not in value
     if isinstance(value, str):
-        try:
-            return float(value) != 0
-        except ValueError:
-            return True
+        return True
     return bool(value)
 
 
@@ -216,8 +208,9 @@ def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) 
     keep ``meta`` whole, and an operator or expression never keeps a field
     whole). An exclusion projection returns everything except the falsy paths
     and any ``$slice``, so a field is whole only when nothing overlapping it is
-    excluded or sliced. ``_id`` is whole unless it is excluded, computed, or
-    has a projected descendant.
+    excluded or sliced. ``_id`` is included whole by default, so it — and any
+    sort field nested under it — is whole unless the ``_id`` subtree is
+    excluded, computed, or truncated by a descendant projection.
 
     The projection form is decided by the fields other than ``_id``, because
     ``_id`` may appear in either form: ``{"_id": 1, "secret": 0}`` is an
@@ -226,30 +219,30 @@ def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) 
     """
     if projection is None:
         return True
-    if field == _ID:
-        # A descendant like ``_id.part`` truncates a document-valued _id, and a
-        # computed value (``{"$toString": "$_id"}``) is not the stored id at
-        # all, so both break the tiebreaker.
-        if any(path.startswith(f"{_ID}.") for path in projection):
-            return False
-        return _is_whole_field_flag(projection.get(_ID, 1))
     others = {path: value for path, value in projection.items() if path != _ID}
     inclusion = (
         any(_is_inclusion_entry(value) for value in others.values())
         if others
         else _is_inclusion_entry(projection.get(_ID, 0))
     )
+    # ``_id`` is included whole by default, so a sort field nested under it
+    # (``"_id.rank"``) is present unless the projection says otherwise. Model
+    # that as an implicit ``{"_id": 1}`` entry, unless the projection already
+    # touches the ``_id`` subtree (``_id`` itself or a descendant).
+    paths = projection
+    if not any(path == _ID or path.startswith(f"{_ID}.") for path in projection):
+        paths = {**projection, _ID: 1}
     if inclusion:
         return any(
             (field == path or field.startswith(f"{path}."))
             and _is_whole_field_flag(value)
-            for path, value in others.items()
+            for path, value in paths.items()
         )
     return not any(
         field == path
         or field.startswith(f"{path}.")
         or path.startswith(f"{field}.")
-        for path, value in others.items()
+        for path, value in paths.items()
         if not _is_whole_field_flag(value)
     )
 
@@ -257,14 +250,20 @@ def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) 
 def _id_seek(direction: int, last_id: Any) -> dict[str, Any]:
     """Build the ``_id`` tiebreaker seek past ``last_id``.
 
-    ``_id`` is unique, so at most one document has a null ``_id``: ascending it
-    sorts first, so every non-null id follows; descending it sorts last, so
-    nothing follows and the range comparison (``$lt: null``) matches nothing.
+    ``_id`` is unique, so at most one document has a null ``_id``. Range
+    comparisons are type-bracketed, so a plain ``$gt``/``$lt`` never matches the
+    null id: ascending it sorts first (so every non-null id follows), descending
+    it sorts last (so it must be added explicitly when seeking down from a
+    non-null id).
     """
-    if last_id is None and direction == ASCENDING:
-        return {_ID: {"$ne": None}}
-    operator = "$gt" if direction == ASCENDING else "$lt"
-    return {_ID: {operator: last_id}}
+    if last_id is None:
+        if direction == ASCENDING:
+            return {_ID: {"$ne": None}}
+        # The null id is last descending, so nothing follows it.
+        return {_ID: {"$lt": None}}
+    if direction == ASCENDING:
+        return {_ID: {"$gt": last_id}}
+    return {"$or": [{_ID: {"$lt": last_id}}, {_ID: None}]}
 
 
 def _keyset_query(

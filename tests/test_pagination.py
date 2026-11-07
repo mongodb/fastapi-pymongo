@@ -265,12 +265,24 @@ def test_cursor_page_accepts_projection_that_returns_cursor_fields(projection):
         ({"comments": {"$slice": 3}, "n": 1}, "comments", False),
         # A string value is an expression that replaces the field, not a flag.
         ({"n": "$other"}, "n", False),
+        ({"n": "1"}, "n", False),  # even a numeric string replaces the value
+        ({"label": "0"}, "n", False),  # expression makes it inclusion, omitting n
+        ({"label": "0"}, "label", False),
+        ({"n": "1"}, "_id", True),  # _id still included by default
         # A truthy non-1 scalar is still an inclusion flag.
         ({"n": 2}, "n", True),
         # _id is truncated by a descendant projection or a computed value.
         ({"_id.part": 0}, "_id", False),
         ({"_id.part": 1}, "_id", False),
         ({"_id": {"$toString": "$_id"}}, "_id", False),
+        # A sort field nested under _id is present when _id is included whole.
+        ({"_id": 1}, "_id.rank", True),
+        ({}, "_id.rank", True),  # everything is returned
+        ({"n": 1}, "_id.rank", True),  # _id included by default
+        ({"_id": 0}, "_id.rank", False),  # _id excluded
+        ({"_id.rank": 1}, "_id.rank", True),
+        ({"_id.rank.sub": 1}, "_id.rank", False),  # deeper path truncates it
+        ({"_id.rank": 0}, "_id.rank", False),
     ],
 )
 def test_projection_returns_fully(projection, field, expected):
@@ -308,10 +320,12 @@ def test_resolve_field_rejects_array_traversal():
 # --- _id_seek / _keyset_query: the seek predicate, including nulls ---
 
 
-def test_id_seek_non_null_uses_range_comparison():
+def test_id_seek_non_null():
     oid = ObjectId()
     assert _id_seek(ASCENDING, oid) == {"_id": {"$gt": oid}}
-    assert _id_seek(DESCENDING, oid) == {"_id": {"$lt": oid}}
+    # Descending: the null id sorts after every non-null id, and range
+    # comparisons are type-bracketed, so a bare $lt would skip it.
+    assert _id_seek(DESCENDING, oid) == {"$or": [{"_id": {"$lt": oid}}, {"_id": None}]}
 
 
 def test_id_seek_ascending_null_id_follows_with_non_null_ids():
