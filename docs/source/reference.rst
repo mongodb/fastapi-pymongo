@@ -7,11 +7,13 @@ Why
 ``fastapi-pymongo`` is not an ODM. It does not persist objects, build queries, or manage
 relationships. That's what full ODMs like
 `Beanie <https://github.com/BeanieODM/beanie>`_ do, and do well. This
-package covers only two narrow, recurring friction points at the
+package covers only three narrow, recurring friction points at the
 FastAPI/PyMongo boundary:
 
-- ``ObjectId`` not being a Pydantic/JSON-native type, and
-- wiring a client into FastAPI's lifespan and dependency injection.
+- ``ObjectId`` not being a Pydantic/JSON-native type,
+- wiring a client into FastAPI's lifespan and dependency injection, and
+- keyset (cursor) pagination that avoids the shifting-window duplicates and
+  gaps of ``skip``/``limit`` (see :doc:`pagination`).
 
 For querying, relationships, or schema migrations, reach for an ODM on
 top of this, or Beanie directly. See :doc:`beanie`:
