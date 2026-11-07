@@ -266,7 +266,14 @@ def test_cursor_page_accepts_projection_that_returns_cursor_fields(projection):
         ({"label": "0"}, "n", False),  # expression makes it inclusion, omitting n
         ({"label": "0"}, "label", False),
         ({"n": "1"}, "_id", True),  # _id still included by default
-        # A truthy non-1 scalar is still an inclusion flag.
+        # Non-boolean/number literals are computed inclusions that replace the
+        # field, not flags.
+        ({"n": []}, "n", False),
+        ({"n": [1, 2]}, "n", False),
+        ({"n": None}, "n", False),
+        ({"n": datetime(2026, 1, 1)}, "n", False),
+        ({"n": []}, "_id", True),  # still inclusion mode, _id kept
+        # A truthy non-1 number is still an inclusion flag.
         ({"n": 2}, "n", True),
         # _id is truncated by a descendant projection or a computed value.
         ({"_id.part": 0}, "_id", False),
@@ -316,23 +323,19 @@ def test_resolve_field_rejects_array_traversal():
 # --- _id_seek / _keyset_query: the seek predicate, including nulls ---
 
 
-def test_id_seek_non_null():
+def test_id_seek_uses_bson_total_order():
+    # $expr compares across BSON types (a type-bracketed $gt/$lt would skip a
+    # string id when seeking past an integer one), and $literal keeps a string
+    # id from being read as a field path.
     oid = ObjectId()
-    assert _id_seek(ASCENDING, oid) == {"_id": {"$gt": oid}}
-    # Descending: the null id sorts after every non-null id, and range
-    # comparisons are type-bracketed, so a bare $lt would skip it.
-    assert _id_seek(DESCENDING, oid) == {"$or": [{"_id": {"$lt": oid}}, {"_id": None}]}
+    assert _id_seek(ASCENDING, oid) == {"$expr": {"$gt": ["$_id", {"$literal": oid}]}}
+    assert _id_seek(DESCENDING, oid) == {"$expr": {"$lt": ["$_id", {"$literal": oid}]}}
 
 
-def test_id_seek_ascending_null_id_follows_with_non_null_ids():
-    # A null _id sorts first ascending; a bare ``$gt: null`` would match nothing
-    # and drop the rows after it.
-    assert _id_seek(ASCENDING, None) == {"_id": {"$ne": None}}
-
-
-def test_id_seek_descending_null_id_matches_nothing():
-    # Null sorts last descending, so nothing follows the null _id.
-    assert _id_seek(DESCENDING, None) == {"_id": {"$lt": None}}
+def test_id_seek_null_id_uses_bson_order():
+    # A null id is lowest in BSON order: first ascending, last descending.
+    assert _id_seek(ASCENDING, None) == {"$expr": {"$gt": ["$_id", {"$literal": None}]}}
+    assert _id_seek(DESCENDING, None) == {"$expr": {"$lt": ["$_id", {"$literal": None}]}}
 
 
 def test_keyset_query_wraps_sort_value_in_eq():
@@ -340,16 +343,28 @@ def test_keyset_query_wraps_sort_value_in_eq():
     # ``{"$regex": ...}`` as a predicate, so it must be wrapped in $eq.
     oid = ObjectId()
     query = _keyset_query({}, "n", ASCENDING, {"$regex": "x"}, oid)
-    assert {"$and": [{"n": {"$eq": {"$regex": "x"}}}, {"_id": {"$gt": oid}}]} in query["$or"]
+    assert {
+        "$and": [
+            {"n": {"$eq": {"$regex": "x"}}},
+            {"$expr": {"$gt": ["$_id", {"$literal": oid}]}},
+        ]
+    } in query["$or"]
 
 
 def test_keyset_query_null_id_tiebreaker_ascending():
     query = _keyset_query({}, "n", ASCENDING, 5, None)
-    assert {"$and": [{"n": {"$eq": 5}}, {"_id": {"$ne": None}}]} in query["$or"]
+    assert {
+        "$and": [
+            {"n": {"$eq": 5}},
+            {"$expr": {"$gt": ["$_id", {"$literal": None}]}},
+        ]
+    } in query["$or"]
 
 
 def test_keyset_query_default_id_sort_ascending_null_id():
-    assert _keyset_query({}, "_id", ASCENDING, None, None) == {"_id": {"$ne": None}}
+    assert _keyset_query({}, "_id", ASCENDING, None, None) == {
+        "$expr": {"$gt": ["$_id", {"$literal": None}]}
+    }
 
 
 # --- page_params dependency, exercised through a real FastAPI app ---

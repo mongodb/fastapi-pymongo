@@ -139,7 +139,8 @@ What this does not do
   ``$gt``/``$lt``, which only compare within a single BSON type (numbers
   compare together; other types do not cross). A field holding, say, both
   strings and numbers will stop early. Null and missing are handled; genuinely
-  mixed non-null types are not.
+  mixed non-null types are not. ``_id`` is exempt: the tiebreaker compares by
+  BSON order, so ids of different types still page correctly.
 - **Array-valued sort fields are not supported.** MongoDB orders an array
   field by its minimum element, but the seek compares arrays
   lexicographically, so a walk over array values can repeat documents. Sort

@@ -159,26 +159,32 @@ def _resolve_field(document: Mapping[str, Any], path: str) -> Any:
 def _is_whole_field_flag(value: Any) -> bool:
     """Return whether a projection entry includes its field in full.
 
-    Only a truthy scalar (``1``, ``true``, a non-zero number) is an inclusion
-    flag. A string is an expression that replaces the field (``{"n": "1"}``
-    sets ``n`` to ``"1"``), and an operator or falsy value does not include it.
+    Only a BSON boolean or number is a flag (``1``/``true`` include,
+    ``0``/``false`` exclude). Any other literal — a string, date, array, or
+    ``None`` — is a computed value that replaces the field, so it never returns
+    the stored field.
     """
-    if isinstance(value, (Mapping, str)):
-        return False
-    return bool(value)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False
 
 
 def _is_inclusion_entry(value: Any) -> bool:
     """Return whether a projection entry selects inclusion mode.
 
-    Include flags, expressions (any string), and operators other than ``$slice``
-    are inclusion; exclude flags and a standalone ``$slice`` are exclusion.
+    Include flags, computed literals (anything that is not a flag or operator),
+    and operators other than ``$slice`` are inclusion; exclude flags and a
+    standalone ``$slice`` are exclusion.
     """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
     if isinstance(value, Mapping):
         return "$slice" not in value
-    if isinstance(value, str):
-        return True
-    return bool(value)
+    return True
 
 
 def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) -> bool:
@@ -226,18 +232,13 @@ def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) 
 def _id_seek(direction: int, last_id: Any) -> dict[str, Any]:
     """Build the ``_id`` tiebreaker seek past ``last_id``.
 
-    ``_id`` is unique, so at most one document has a null ``_id``. Range
-    comparisons are type-bracketed and never match it: ascending it sorts first
-    (all non-null ids follow), descending it sorts last (so add it explicitly).
+    ``$expr`` compares by BSON total order, so it handles ids of different types
+    (which a type-bracketed ``$gt``/``$lt`` would skip) and the null id — first
+    ascending, last descending — without special cases. ``$_id`` is the field
+    path and ``$literal`` keeps a string id from being read as one.
     """
-    if last_id is None:
-        if direction == ASCENDING:
-            return {_ID: {"$ne": None}}
-        # The null id is last descending, so nothing follows it.
-        return {_ID: {"$lt": None}}
-    if direction == ASCENDING:
-        return {_ID: {"$gt": last_id}}
-    return {"$or": [{_ID: {"$lt": last_id}}, {_ID: None}]}
+    operator = "$gt" if direction == ASCENDING else "$lt"
+    return {"$expr": {operator: [f"${_ID}", {"$literal": last_id}]}}
 
 
 def _keyset_query(
@@ -302,7 +303,7 @@ async def cursor_page(
 
     Null and missing sort values page correctly, as does a null ``_id``.
     Non-null sort values must share one BSON type: the seek's ``$gt``/``$lt`` do
-    not compare across types.
+    not compare across types (``_id`` is exempt, compared by BSON order).
 
     :param collection: the PyMongo async collection to read from.
     :param params: the page cursor and size, usually from :func:`page_params`.

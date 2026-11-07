@@ -479,6 +479,41 @@ def test_cursor_page_default_id_sort_descending_handles_null_id(app_and_db):
     assert len(docs) == 2
 
 
+def test_cursor_page_handles_mixed_type_ids(app_and_db):
+    # _id values of different BSON types still sort by BSON order, so the
+    # tiebreaker must compare across types; a type-bracketed $gt would stop
+    # early after the integer id and drop the string one.
+    _seed(app_and_db, [{"_id": 1, "n": 5}, {"_id": "x", "n": 5}])
+    docs = _page_all(app_and_db, size=1, sort_field="n")
+    assert {d["_id"] for d in docs} == {1, "x"}
+
+
+def test_cursor_page_descending_handles_mixed_type_ids(app_and_db):
+    _seed(app_and_db, [{"_id": 1, "n": 5}, {"_id": "x", "n": 5}])
+    docs = _page_all(app_and_db, size=1, sort_field="n", direction=DESCENDING)
+    assert {d["_id"] for d in docs} == {1, "x"}
+
+
+def test_cursor_page_rejects_computed_literal_projection(app_and_db):
+    # An array literal is a computed value that replaces the sort field, not an
+    # inclusion flag, so it must be rejected.
+    _seed(app_and_db, [{"n": i} for i in range(4)])
+    _, database = app_and_db
+    uri = MongoSettings().uri
+
+    async def _run():
+        async with AsyncMongoClient(uri) as client:
+            return await cursor_page(
+                client[database].items,
+                PageParams(size=2),
+                sort_field="n",
+                projection={"n": [1, 2]},
+            )
+
+    with pytest.raises(ValueError, match="projection must return"):
+        asyncio.run(_run())
+
+
 def test_cursor_page_rejects_numeric_string_projection(app_and_db):
     # A numeric string is an expression that replaces the stored value, so it
     # must not count as returning the sort field.
