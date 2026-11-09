@@ -44,7 +44,7 @@ Usage
 -----
 
 A runnable version is in
-`examples/pagination/main.py <https://github.com/aclark4life/fastapi-pymongo/blob/main/examples/pagination/main.py>`_.
+`examples/pagination/main.py <https://github.com/mongodb/fastapi-pymongo/blob/main/examples/pagination/main.py>`_.
 
 .. code-block:: python
 
