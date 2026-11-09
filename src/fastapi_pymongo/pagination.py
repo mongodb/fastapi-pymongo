@@ -116,7 +116,8 @@ def page_params(
 ) -> PageParams:
     """FastAPI dependency that parses ``?cursor=`` and ``?size=``.
 
-    Use it with ``Depends`` so both parameters appear in the OpenAPI docs::
+    Attach it to a route with ``Depends`` so FastAPI reads both query parameters
+    and lists them in the OpenAPI schema::
 
         async def list_items(params: PageParams = Depends(page_params)):
             ...

@@ -122,9 +122,8 @@ in the order used:
    )
 
 That index fits a descending ``created_at`` walk. The walk examples above use
-the default, ascending, direction, so index ``ASCENDING`` there. Either way is
-cheap — MongoDB scans an index in reverse just as well — so match the leading
-direction to the sort you use most and reuse the index for both.
+the default, ascending, direction, so index ``ASCENDING`` there. Match the
+leading direction to the sort you use most.
 
 What this does not do
 ---------------------
