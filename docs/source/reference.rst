@@ -12,8 +12,7 @@ FastAPI/PyMongo boundary:
 
 - ``ObjectId`` not being a Pydantic/JSON-native type,
 - wiring a client into FastAPI's lifespan and dependency injection, and
-- keyset (cursor) pagination that avoids the shifting-window duplicates and
-  gaps of ``skip``/``limit`` (see :doc:`pagination`).
+- Cursor pagination (see :doc:`pagination`).
 
 For querying, relationships, or schema migrations, reach for an ODM on
 top of this, or Beanie directly. See :doc:`beanie`:
@@ -21,7 +20,7 @@ top of this, or Beanie directly. See :doc:`beanie`:
 initialization alongside the rest of ``fastapi_pymongo``, reusing the
 same client and settings.
 
-See the repo `README <https://github.com/mongodb/fastapi-pymongo#references>`_
+See the repo `README <https://github.com/aclark4life/fastapi-pymongo#references>`_
 for related Jira tickets. The community discussion behind ``PyObjectId``:
 `fastapi#9074 <https://github.com/fastapi/fastapi/discussions/9074>`_;
 the same request upstream:

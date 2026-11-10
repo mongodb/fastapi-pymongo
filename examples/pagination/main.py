@@ -1,4 +1,4 @@
-"""Cursor-paginated listing: FastAPI + PyMongo Async, via fastapi-pymongo.
+"""Cursor-paginated listing using fastapi-pymongo.
 
 Run:
     pip install -e ".[dev]"

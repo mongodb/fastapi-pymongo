@@ -34,8 +34,8 @@ beanie = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mongodb/fastapi-pymongo"
-Issues = "https://github.com/mongodb/fastapi-pymongo/issues"
+Homepage = "https://github.com/aclark4life/fastapi-pymongo"
+Issues = "https://github.com/aclark4life/fastapi-pymongo/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -50,6 +50,8 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = '-m "not perf"'
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "perf: performance overhead tests, run explicitly with `pytest -m perf`",
     "integration: tests that require a running MongoDB deployment",

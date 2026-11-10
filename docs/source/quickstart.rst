@@ -2,7 +2,7 @@ Quickstart
 ==========
 
 This walks through the full example at
-`examples/quickstart/main.py <https://github.com/mongodb/fastapi-pymongo/blob/main/examples/quickstart/main.py>`_,
+`examples/quickstart/main.py <https://github.com/aclark4life/fastapi-pymongo/blob/main/examples/quickstart/main.py>`_,
 a minimal CRUD app.
 
 1. Configure settings and lifespan

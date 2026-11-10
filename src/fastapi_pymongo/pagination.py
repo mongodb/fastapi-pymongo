@@ -1,6 +1,6 @@
 """Cursor (keyset) pagination for raw PyMongo Async collections.
 
-:func:`cursor_page` returns one page of documents plus an opaque token for
+:func:`cursor_page` returns one page of documents plus a token for
 the next page. It is deliberately not a query builder or an ODM: you pass a
 collection and a filter, and it returns documents.
 """
@@ -10,14 +10,17 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from bson import BSON
-from bson.codec_options import DEFAULT_CODEC_OPTIONS, CodecOptions
+from bson.codec_options import DEFAULT_CODEC_OPTIONS
 from bson.errors import InvalidBSON
 from fastapi import HTTPException, Query
 from pymongo import ASCENDING, DESCENDING
-from pymongo.asynchronous.collection import AsyncCollection
+
+if TYPE_CHECKING:
+    from bson.codec_options import CodecOptions
+    from pymongo.asynchronous.collection import AsyncCollection
 
 DEFAULT_PAGE_SIZE = 20
 
@@ -41,7 +44,7 @@ class InvalidCursor(HTTPException):
 class PageParams:
     """Pagination inputs parsed from the query string.
 
-    :param cursor: opaque token from the previous page's ``next_cursor``, or
+    :param cursor: Token from the previous page's ``next_cursor``, or
         ``None`` for the first page.
     :param size: maximum number of documents per page.
     """
@@ -69,11 +72,7 @@ def _encode_cursor(
     direction: int,
     codec_options: CodecOptions[Any] = DEFAULT_CODEC_OPTIONS,
 ) -> str:
-    """Encode ``(sort_value, _id, direction)`` as an opaque, URL-safe token.
-
-    The payload is BSON, so any storable value round-trips. ``codec_options``
-    are the collection's, so codec-dependent values (e.g. ``uuid.UUID``) encode
-    as they were read.
+    """Encode ``(sort_value, _id, direction)`` as a URL-safe token.
     """
     payload = BSON.encode(
         {"sort_value": sort_value, "_id": doc_id, "direction": direction},
@@ -90,6 +89,8 @@ def _decode_cursor(
 
     :raises InvalidCursor: if the token is malformed.
     """
+    # Restore the base64 padding that _encode_cursor stripped. Decoding needs a
+    # length that is a multiple of 4; ``-len % 4`` is how many ``=`` to add.
     padded = token + "=" * (-len(token) % _BASE64_GROUP_SIZE)
     try:
         document = BSON(base64.urlsafe_b64decode(padded)).decode(
@@ -97,14 +98,13 @@ def _decode_cursor(
         )
         return document["sort_value"], document["_id"], document["direction"]
     except (InvalidBSON, KeyError, ValueError) as exc:
-        # binascii.Error is a ValueError, so bad base64 is covered here too.
         raise InvalidCursor() from exc
 
 
 def page_params(
     cursor: Annotated[
         str | None,
-        Query(description="Opaque cursor from the previous page's next_cursor."),
+        Query(description="Cursor from the previous page's next_cursor."),
     ] = None,
     size: Annotated[
         int,
@@ -159,11 +159,6 @@ def _resolve_field(document: Mapping[str, Any], path: str) -> Any:
 
 def _is_whole_field_flag(value: Any) -> bool:
     """Return whether a projection entry includes its field in full.
-
-    Only a BSON boolean or number is a flag (``1``/``true`` include,
-    ``0``/``false`` exclude). Any other literal — a string, date, array, or
-    ``None`` — is a computed value that replaces the field, so it never returns
-    the stored field.
     """
     if isinstance(value, bool):
         return value
@@ -174,10 +169,6 @@ def _is_whole_field_flag(value: Any) -> bool:
 
 def _is_inclusion_entry(value: Any) -> bool:
     """Return whether a projection entry selects inclusion mode.
-
-    Include flags, computed literals (anything that is not a flag or operator),
-    and operators other than ``$slice`` are inclusion; exclude flags and a
-    standalone ``$slice`` are exclusion.
     """
     if isinstance(value, bool):
         return value
@@ -190,16 +181,6 @@ def _is_inclusion_entry(value: Any) -> bool:
 
 def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) -> bool:
     """Return whether ``projection`` returns ``field`` in full.
-
-    A field is whole only if its whole value comes back: an inclusion projection
-    must include it (or an ancestor) with a flag (``{"meta": 1}`` keeps
-    ``meta.rank`` whole; ``{"meta.rank": 1}`` does not keep ``meta``), and an
-    exclusion projection must not exclude or ``$slice`` anything overlapping it.
-    ``_id`` is included by default, so it and any field nested under it are whole
-    unless the ``_id`` subtree is excluded, computed, or truncated.
-
-    The form is decided by the fields other than ``_id`` (which may appear in
-    either): ``{"_id": 1, "secret": 0}`` is an exclusion projection.
     """
     if projection is None:
         return True
@@ -232,11 +213,6 @@ def _projection_returns_fully(projection: Mapping[str, Any] | None, field: str) 
 
 def _id_seek(direction: int, last_id: Any) -> dict[str, Any]:
     """Build the ``_id`` tiebreaker seek past ``last_id``.
-
-    ``$expr`` compares by BSON total order, so it handles ids of different types
-    (which a type-bracketed ``$gt``/``$lt`` would skip) and the null id — first
-    ascending, last descending — without special cases. ``$_id`` is the field
-    path and ``$literal`` keeps a string id from being read as one.
     """
     operator = "$gt" if direction == ASCENDING else "$lt"
     return {"$expr": {operator: [f"${_ID}", {"$literal": last_id}]}}
@@ -315,8 +291,7 @@ async def cursor_page(
         ``pymongo.DESCENDING``.
     :param filter: an optional MongoDB query, passed through unchanged.
     :param projection: an optional projection. It must return ``sort_field`` and
-        ``_id`` in full (a subdocument ``sort_field`` must come back whole), or
-        :exc:`ValueError` is raised.
+        ``_id`` in full.
     :raises InvalidCursor: if ``params.cursor`` is malformed, or was issued
         for a different sort direction.
     :raises ValueError: if ``direction`` is invalid, ``params.size`` is below 1,
@@ -364,9 +339,10 @@ async def cursor_page(
 
     has_more = len(documents) > params.size
     items = documents[: params.size]
-    # Resolve every returned document, not just the cursor's: an array traversal
-    # anywhere makes the ordering unreproducible, so it must raise wherever it
-    # lands. A missing sort field resolves to null, which MongoDB orders as null.
+    # Resolve the sort field for every returned document so an array traversal
+    # anywhere in the page raises, since it makes the ordering unreproducible.
+    # The cursor itself only needs the last document's value. A missing sort
+    # field resolves to null, which MongoDB orders as null.
     resolved = [_resolve_field(document, sort_field) for document in items]
     next_cursor = None
     if has_more and items:
