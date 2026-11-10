@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- `cursor_page` and `page_params`: keyset (cursor) pagination for raw PyMongo
+- `cursor_page` and `page_params`: cursor pagination for raw PyMongo
   Async collections, with `?cursor=&size=` surfaced in the OpenAPI docs.
 
 ## [0.1.0a4] - 2026-10-27

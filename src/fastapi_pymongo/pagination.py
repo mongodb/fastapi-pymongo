@@ -1,4 +1,4 @@
-"""Cursor (keyset) pagination for raw PyMongo Async collections.
+"""Cursor pagination for raw PyMongo Async collections.
 
 :func:`cursor_page` returns one page of documents plus a token for
 the next page. It is deliberately not a query builder or an ODM: you pass a
@@ -132,7 +132,7 @@ def _resolve_field(document: Mapping[str, Any], path: str) -> Any:
     to ``None`` (MongoDB treats a missing field as null).
 
     :raises ValueError: if ``path`` crosses an array by name, whose min-element
-        ordering the keyset seek cannot reproduce.
+        ordering the seek cannot reproduce.
     """
     value: Any = document
     for part in path.split("."):
@@ -218,7 +218,7 @@ def _id_seek(direction: int, last_id: Any) -> dict[str, Any]:
     return {"$expr": {operator: [f"${_ID}", {"$literal": last_id}]}}
 
 
-def _keyset_query(
+def _seek_query(
     base: Mapping[str, Any],
     sort_field: str,
     direction: int,
@@ -268,7 +268,7 @@ async def cursor_page(
     filter: Mapping[str, Any] | None = None,
     projection: Mapping[str, Any] | None = None,
 ) -> CursorPage:
-    """Fetch one keyset-paginated page from ``collection``.
+    """Fetch one cursor-paginated page from ``collection``.
 
     Documents are ordered by ``sort_field``, breaking ties on ``_id`` (so just
     ``_id`` when ``sort_field`` is ``_id``), giving a stable total order. To read
@@ -326,7 +326,7 @@ async def cursor_page(
         )
         if cursor_direction != direction:
             raise InvalidCursor("cursor was issued for a different sort direction")
-        query = _keyset_query(query, sort_field, direction, last_value, last_id)
+        query = _seek_query(query, sort_field, direction, last_value, last_id)
 
     if sort_field == _ID:
         sort_spec: list[tuple[str, int]] = [(_ID, direction)]

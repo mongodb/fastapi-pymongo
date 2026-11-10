@@ -15,10 +15,10 @@ Why
 Offset pagination (``skip``/``limit``) is easy, but it has two problems:
 ``skip`` is an O(n) scan on the server, so deep pages get slower, and
 concurrent inserts or deletes shift the window, so clients see duplicates or
-miss documents. Keyset pagination, a type of cursor pagination, avoids both by seeking past
+miss documents. Cursor pagination avoids both by seeking past
 the last document's sort key rather than counting from the top.
 
-This module provides keyset pagination for a FastAPI + ``AsyncMongoClient``
+This module provides cursor pagination for a FastAPI + ``AsyncMongoClient``
 app.
 
 How it works

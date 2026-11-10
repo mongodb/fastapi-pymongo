@@ -464,7 +464,7 @@ async def test_cursor_page_supports_uuid_sort_values(db):
 
 @pytest.mark.xfail(
     strict=True,
-    reason="keyset seek compares within one BSON type; see the pagination docs",
+    reason="the seek compares within one BSON type; see the pagination docs",
 )
 async def test_cursor_page_mixed_sort_types_stop_early(db):
     # Documents a known limitation: non-null sort values of different BSON

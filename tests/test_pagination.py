@@ -20,9 +20,9 @@ from fastapi_pymongo.pagination import (
     _decode_cursor,
     _encode_cursor,
     _id_seek,
-    _keyset_query,
     _projection_returns_fully,
     _resolve_field,
+    _seek_query,
 )
 
 
@@ -320,7 +320,7 @@ def test_resolve_field_rejects_array_traversal():
         _resolve_field({"tags": [{"rank": 1}, {"rank": 2}]}, "tags.rank")
 
 
-# --- _id_seek / _keyset_query: the seek predicate, including nulls ---
+# --- _id_seek / _seek_query: the seek predicate, including nulls ---
 
 
 def test_id_seek_uses_bson_total_order():
@@ -338,11 +338,11 @@ def test_id_seek_null_id_uses_bson_order():
     assert _id_seek(DESCENDING, None) == {"$expr": {"$lt": ["$_id", {"$literal": None}]}}
 
 
-def test_keyset_query_wraps_sort_value_in_eq():
+def test_seek_query_wraps_sort_value_in_eq():
     # The sort value is client-supplied BSON; shorthand equality would run
     # ``{"$regex": ...}`` as a predicate, so it must be wrapped in $eq.
     oid = ObjectId()
-    query = _keyset_query({}, "n", ASCENDING, {"$regex": "x"}, oid)
+    query = _seek_query({}, "n", ASCENDING, {"$regex": "x"}, oid)
     assert {
         "$and": [
             {"n": {"$eq": {"$regex": "x"}}},
@@ -351,8 +351,8 @@ def test_keyset_query_wraps_sort_value_in_eq():
     } in query["$or"]
 
 
-def test_keyset_query_null_id_tiebreaker_ascending():
-    query = _keyset_query({}, "n", ASCENDING, 5, None)
+def test_seek_query_null_id_tiebreaker_ascending():
+    query = _seek_query({}, "n", ASCENDING, 5, None)
     assert {
         "$and": [
             {"n": {"$eq": 5}},
@@ -361,8 +361,8 @@ def test_keyset_query_null_id_tiebreaker_ascending():
     } in query["$or"]
 
 
-def test_keyset_query_default_id_sort_ascending_null_id():
-    assert _keyset_query({}, "_id", ASCENDING, None, None) == {
+def test_seek_query_default_id_sort_ascending_null_id():
+    assert _seek_query({}, "_id", ASCENDING, None, None) == {
         "$expr": {"$gt": ["$_id", {"$literal": None}]}
     }
 
