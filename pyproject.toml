@@ -32,6 +32,9 @@ docs = [
 beanie = [
     "beanie>=1.26",
 ]
+pagination = [
+    "fastapi-pagination>=0.16.2",
+]
 
 [project.urls]
 Homepage = "https://github.com/aclark4life/fastapi-pymongo"
