@@ -34,8 +34,8 @@ beanie = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aclark4life/fastapi-pymongo"
-Issues = "https://github.com/aclark4life/fastapi-pymongo/issues"
+Homepage = "https://github.com/mongodb/fastapi-pymongo"
+Issues = "https://github.com/mongodb/fastapi-pymongo/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

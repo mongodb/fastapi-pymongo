@@ -2,7 +2,7 @@ Beanie integration
 ====================
 
 This walks through
-`examples/beanie <https://github.com/aclark4life/fastapi-pymongo/tree/main/examples/beanie>`_,
+`examples/beanie <https://github.com/mongodb/fastapi-pymongo/tree/main/examples/beanie>`_,
 the same CRUD app as :doc:`quickstart`, built on
 `Beanie <https://github.com/BeanieODM/beanie>`_ instead of raw PyMongo.
 

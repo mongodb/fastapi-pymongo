@@ -9,7 +9,7 @@ For local development (tests, the quickstart app):
 
 .. code-block:: bash
 
-   git clone https://github.com/aclark4life/fastapi-pymongo
+   git clone https://github.com/mongodb/fastapi-pymongo
    cd fastapi-pymongo
    pip install -e ".[dev]"
    pytest
