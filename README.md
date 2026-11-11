@@ -19,6 +19,12 @@ Optional Beanie integration:
 pip install "fastapi-pymongo[beanie]"
 ```
 
+Optional cursor pagination via [fastapi-pagination](https://github.com/uriyyo/fastapi-pagination):
+
+```bash
+pip install "fastapi-pymongo[pagination]"
+```
+
 ## Examples
 
 - [`examples/quickstart`](https://github.com/aclark4life/fastapi-pymongo/tree/main/examples/quickstart): minimal CRUD app, raw PyMongo.
