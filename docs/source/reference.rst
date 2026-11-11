@@ -10,8 +10,8 @@ relationships. That's what full ODMs like
 package covers only two narrow, recurring friction points at the
 FastAPI/PyMongo boundary:
 
-- ``ObjectId`` not being a Pydantic/JSON-native type, and
-- wiring a client into FastAPI's lifespan and dependency injection.
+- ``ObjectId`` not being a Pydantic/JSON-native type (see :doc:`objectid`), and
+- wiring a client into FastAPI's lifespan and dependency injection (see :doc:`lifespan`).
 
 For querying, relationships, or schema migrations, reach for an ODM on
 top of this, or Beanie directly. See :doc:`beanie`:
