@@ -45,6 +45,7 @@ where = ["src"]
 ignore = ["B008"]
 
 [tool.mypy]
+strict = true
 # pymongo has no stubs on PyPI; the driver's own annotations cover our usage.
 ignore_missing_imports = true
 
