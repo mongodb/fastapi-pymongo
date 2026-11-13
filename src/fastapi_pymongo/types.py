@@ -23,6 +23,9 @@ class PyObjectId(_ObjectId):
         class Item(BaseModel):
             id: PyObjectId = Field(alias="_id", default_factory=PyObjectId)
             model_config = ConfigDict(populate_by_name=True)
+
+    :raises ValueError: When used as a field type, if the value is neither an
+        ``ObjectId`` nor a valid 24-character hex string.
     """
 
     @classmethod

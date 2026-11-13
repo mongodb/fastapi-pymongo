@@ -47,6 +47,10 @@ def beanie_lifespan(
     for any route that wants the raw PyMongo database alongside Beanie
     document classes.
 
+    :param settings: Connection settings for the client.
+    :param document_models: The Beanie document models to initialize, passed
+        through to ``init_beanie``.
+
     Usage::
 
         settings = MongoSettings()

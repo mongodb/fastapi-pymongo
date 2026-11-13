@@ -29,6 +29,8 @@ def mongo_lifespan(
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     """Build a FastAPI ``lifespan`` that opens the client on startup and closes it on shutdown.
 
+    :param settings: Connection settings for the client.
+
     Usage::
 
         settings = MongoSettings()
@@ -52,6 +54,10 @@ def mongo_lifespan(
 def get_client(request: Request) -> AsyncMongoClient[dict[str, Any]]:
     """FastAPI dependency returning the client opened by :func:`mongo_lifespan`.
 
+    :param request: The incoming request, used to read the client off ``app.state``.
+    :raises RuntimeError: If no client is on ``app.state``, i.e. the app was not
+        created with ``lifespan=mongo_lifespan(settings)``.
+
     Usage::
 
         @app.get("/items")
@@ -67,7 +73,10 @@ def get_client(request: Request) -> AsyncMongoClient[dict[str, Any]]:
 
 
 def get_database(settings: MongoSettings) -> Callable[[Request], AsyncDatabase[dict[str, Any]]]:
-    """FastAPI dependency returning the configured database on the shared client."""
+    """FastAPI dependency returning the configured database on the shared client.
+
+    :param settings: Connection settings supplying the database name.
+    """
 
     def _get_database(request: Request) -> AsyncDatabase[dict[str, Any]]:
         return get_client(request)[settings.database]
