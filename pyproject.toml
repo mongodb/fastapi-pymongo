@@ -40,9 +40,15 @@ Issues = "https://github.com/mongodb/fastapi-pymongo/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.ruff]
+line-length = 100
+
 [tool.ruff.lint]
 # B008: `Depends(...)` in argument defaults is FastAPI's documented idiom.
 ignore = ["B008"]
+# E501 is not in ruff's default rule set; select it so the 100-character limit
+# is enforced by `ruff check`, not only by the formatter.
+extend-select = ["E501"]
 
 [tool.mypy]
 strict = true

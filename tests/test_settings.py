@@ -1,4 +1,3 @@
-
 from fastapi_pymongo import MongoSettings
 
 

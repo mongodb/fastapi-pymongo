@@ -58,9 +58,7 @@ def get_client(request: Request) -> AsyncMongoClient[dict[str, Any]]:
         async def list_items(client: AsyncMongoClient = Depends(get_client)):
             ...
     """
-    client: AsyncMongoClient[dict[str, Any]] | None = getattr(
-        request.app.state, _STATE_KEY, None
-    )
+    client: AsyncMongoClient[dict[str, Any]] | None = getattr(request.app.state, _STATE_KEY, None)
     if client is None:
         raise RuntimeError(
             "No MongoDB client on app.state. Did you set lifespan=mongo_lifespan(settings)?"

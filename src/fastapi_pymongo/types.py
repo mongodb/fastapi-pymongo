@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
     from pydantic.json_schema import JsonSchemaValue
 
+_OBJECT_ID_HEX_LENGTH = 24
+
 
 class PyObjectId(_ObjectId):
     """``bson.ObjectId`` that validates from and serializes to a plain string.
@@ -29,9 +31,7 @@ class PyObjectId(_ObjectId):
     ) -> core_schema.CoreSchema:
         return core_schema.no_info_plain_validator_function(
             cls._validate,
-            serialization=core_schema.plain_serializer_function_ser_schema(
-                str, when_used="json"
-            ),
+            serialization=core_schema.plain_serializer_function_ser_schema(str, when_used="json"),
         )
 
     @classmethod
@@ -48,8 +48,8 @@ class PyObjectId(_ObjectId):
     ) -> JsonSchemaValue:
         return {
             "type": "string",
-            "minLength": 24,
-            "maxLength": 24,
-            "pattern": "^[0-9a-f]{24}$",
+            "minLength": _OBJECT_ID_HEX_LENGTH,
+            "maxLength": _OBJECT_ID_HEX_LENGTH,
+            "pattern": f"^[0-9a-f]{{{_OBJECT_ID_HEX_LENGTH}}}$",
             "example": "507f1f77bcf86cd799439011",
         }

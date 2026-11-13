@@ -37,7 +37,8 @@ def beanie_lifespan(
     settings: MongoSettings,
     document_models: Sequence[type[Document | UnionDoc | View] | str],
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
-    """Build a FastAPI ``lifespan`` that opens the client, runs ``init_beanie``, and closes on shutdown.
+    """Build a FastAPI ``lifespan`` that opens the client, runs ``init_beanie``,
+    and closes on shutdown.
 
     This replaces :func:`fastapi_pymongo.mongo_lifespan`. Use one or the
     other, not both. The client it opens is stored the same way, so
@@ -66,9 +67,7 @@ def beanie_lifespan(
         )
         setattr(app.state, _STATE_KEY, client)
         try:
-            await init_beanie(
-                database=client[settings.database], document_models=document_models
-            )
+            await init_beanie(database=client[settings.database], document_models=document_models)
             yield
         finally:
             await client.close()
