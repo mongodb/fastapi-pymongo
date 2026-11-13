@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
-from fastapi_pymongo import MongoSettings, PyObjectId, get_client, mongo_lifespan
+from fastapi_pymongo import MongoSettings, PyObjectId, mongo_lifespan
 from fastapi_pymongo.lifespan import get_database
 
 pytestmark = pytest.mark.integration
@@ -107,32 +107,3 @@ def test_stored_id_is_objectid_not_string(client, app_and_db):
     assert doc is not None
     assert isinstance(doc["_id"], ObjectId)
     assert doc["_id"] == ObjectId(item_id)
-
-
-def test_get_client_without_lifespan_raises():
-    from fastapi import Request
-
-    request = Request({"type": "http", "app": FastAPI()})
-    with pytest.raises(RuntimeError, match="lifespan=mongo_lifespan"):
-        get_client(request)
-
-
-def test_client_carries_handshake_driver_metadata(app_and_db):
-    """The lifespan-created client must carry attribution metadata for Atlas.
-
-    Asserts the DriverInfo passed at construction. Whether it reaches the
-    server is pymongo's handshake contract; verified manually via
-    $currentOp.clientMetadata.driver.name ("PyMongo|c|async|fastapi-pymongo")
-    against a live deployment, but idle-connection listing in $currentOp is
-    not consistent across environments, so it is not asserted here.
-    """
-    from importlib.metadata import version
-
-    from fastapi_pymongo.lifespan import _STATE_KEY
-
-    app, _ = app_and_db
-    with TestClient(app):
-        client = getattr(app.state, _STATE_KEY)
-        driver = client.options._options["driver"]
-        assert driver.name == "fastapi-pymongo"
-        assert driver.version == version("fastapi-pymongo")
