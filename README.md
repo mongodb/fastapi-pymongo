@@ -28,7 +28,7 @@ pip install "fastapi-pymongo[beanie]"
 
 ```bash
 pip install -e ".[dev]"
-pytest            # unit tests (integration and perf are deselected by default)
+pytest            # unit and integration tests (perf is deselected by default)
 pytest -m perf    # PyObjectId overhead benchmarks
 ruff check src tests examples
 mypy src
