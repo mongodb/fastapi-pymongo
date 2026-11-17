@@ -7,12 +7,16 @@ Run:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from pymongo.asynchronous.database import AsyncDatabase
 
 from fastapi_pymongo import MongoSettings, PyObjectId, mongo_lifespan
 from fastapi_pymongo.lifespan import get_database
+
+if TYPE_CHECKING:
+    from pymongo.asynchronous.database import AsyncDatabase
 
 settings = MongoSettings()
 app = FastAPI(lifespan=mongo_lifespan(settings))
@@ -28,7 +32,7 @@ class Item(BaseModel):
 
 
 @app.post("/items", response_model=Item)
-async def create_item(item: Item, db: AsyncDatabase = Depends(db_dependency)):
+async def create_item(item: Item, db: AsyncDatabase[dict[str, Any]] = Depends(db_dependency)):
     # If PYTHON-4192 ships, this becomes:
     #   await db.items.insert_one(item)
     #   return item
@@ -46,7 +50,7 @@ def _objectid_or_404(item_id: str) -> PyObjectId:
 
 
 @app.get("/items/{item_id}", response_model=Item)
-async def get_item(item_id: str, db: AsyncDatabase = Depends(db_dependency)):
+async def get_item(item_id: str, db: AsyncDatabase[dict[str, Any]] = Depends(db_dependency)):
     # If PYTHON-4192 ships, find_one returns an Item directly:
     #   item = await db.items.find_one({"_id": PyObjectId(item_id)})
     #   if item is None: raise HTTPException(...)
@@ -58,13 +62,13 @@ async def get_item(item_id: str, db: AsyncDatabase = Depends(db_dependency)):
 
 
 @app.get("/items", response_model=list[Item])
-async def list_items(db: AsyncDatabase = Depends(db_dependency)):
+async def list_items(db: AsyncDatabase[dict[str, Any]] = Depends(db_dependency)):
     # If PYTHON-4192 ships, .find() yields Item instances directly.
     return await db.items.find().to_list()
 
 
 @app.delete("/items/{item_id}")
-async def delete_item(item_id: str, db: AsyncDatabase = Depends(db_dependency)):
+async def delete_item(item_id: str, db: AsyncDatabase[dict[str, Any]] = Depends(db_dependency)):
     result = await db.items.delete_one({"_id": _objectid_or_404(item_id)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
