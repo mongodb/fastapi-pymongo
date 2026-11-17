@@ -4,6 +4,7 @@ No MongoDB deployment is required: ``AsyncMongoClient`` connects lazily, so
 the lifespan can be started and stopped without touching a server.
 """
 
+import asyncio
 from importlib.metadata import version
 
 import pytest
@@ -16,6 +17,14 @@ from fastapi_pymongo import MongoSettings, get_client, mongo_lifespan
 from fastapi_pymongo.lifespan import _STATE_KEY, get_database
 
 URI = "mongodb://localhost:27017"
+
+
+@pytest.fixture
+def client():
+    """A client that is closed after the test, whether it passes or fails."""
+    client = AsyncMongoClient(URI)
+    yield client
+    asyncio.run(client.close())
 
 
 def _request_with_client(client: AsyncMongoClient) -> Request:
@@ -46,8 +55,7 @@ def test_mongo_lifespan_closes_client_on_shutdown():
     assert client._closed is True
 
 
-def test_get_client_returns_state_client():
-    client = AsyncMongoClient(URI)
+def test_get_client_returns_state_client(client):
     assert get_client(_request_with_client(client)) is client
 
 
@@ -56,9 +64,8 @@ def test_get_client_without_lifespan_raises():
         get_client(Request({"type": "http", "app": FastAPI()}))
 
 
-def test_get_database_returns_configured_database():
+def test_get_database_returns_configured_database(client):
     settings = MongoSettings(uri=URI, database="myapp")
-    client = AsyncMongoClient(URI)
 
     database = get_database(settings)(_request_with_client(client))
 

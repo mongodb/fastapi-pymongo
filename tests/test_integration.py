@@ -5,6 +5,7 @@ Skip these locally with: pytest -m "not integration".
 """
 
 import asyncio
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -35,13 +36,13 @@ def app_and_db():
     db_dependency = get_database(settings)
 
     @app.post("/items", response_model=Item)
-    async def create_item(item: Item, db: AsyncDatabase = Depends(db_dependency)):
+    async def create_item(item: Item, db: AsyncDatabase[dict[str, Any]] = Depends(db_dependency)):
         doc = item.model_dump(by_alias=True)
         await db.items.insert_one(doc)
         return doc
 
     @app.get("/items/{item_id}", response_model=Item)
-    async def get_item(item_id: str, db: AsyncDatabase = Depends(db_dependency)):
+    async def get_item(item_id: str, db: AsyncDatabase[dict[str, Any]] = Depends(db_dependency)):
         if not PyObjectId.is_valid(item_id):
             raise HTTPException(status_code=404, detail="Item not found")
         doc = await db.items.find_one({"_id": PyObjectId(item_id)})
