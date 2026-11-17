@@ -5,14 +5,16 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from importlib.metadata import version
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Request
 from pymongo import AsyncMongoClient
-from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.driver_info import DriverInfo
 
 from fastapi_pymongo.settings import MongoSettings
+
+if TYPE_CHECKING:
+    from pymongo.asynchronous.database import AsyncDatabase
 
 _STATE_KEY = "fastapi_pymongo_client"
 
