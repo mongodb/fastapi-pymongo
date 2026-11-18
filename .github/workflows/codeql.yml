@@ -29,22 +29,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - language: c-cpp
-          build-mode: manual
-          manual-build-command: pip install -e .
         - language: python
-          build-mode: none
         - language: actions
-          build-mode: none
     steps:
     - uses: mongodb-labs/drivers-github-tools/codeql@99b1cbd729bc83bf7fc74e1b2a97fffad3d65d7b  # v3.1.1
       with:
         language: ${{ matrix.language }}
-        build-mode: ${{ matrix.build-mode }}
-        manual-build-command: ${{ matrix.manual-build-command }}
         ref: ${{ inputs.ref }}
         config: |
           paths-ignore:
-            - 'doc/**'
-            - 'tools/**'
-            - 'test/**'
+            - 'tests/**'
