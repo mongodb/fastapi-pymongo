@@ -14,10 +14,16 @@ on:
       - "[0-9]+.[0-9]+.[0-9]+[a-b][0-9]+"
       - "[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash -eux {0}
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    environment: release
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
