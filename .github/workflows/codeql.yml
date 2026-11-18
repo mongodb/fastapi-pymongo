@@ -2,63 +2,49 @@ name: "CodeQL"
 
 on:
   push:
-    branches: [ "main", "*" ]
+    branches: [ "main", "*"]
+    tags: ['*']
   pull_request:
-    branches: [ "main", "*" ]
-  schedule:
-    - cron: '35 23 * * 5'
   workflow_call:
     inputs:
       ref:
         required: true
         type: string
+  schedule:
+    - cron: '17 10 * * 2'
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze:
-    name: Analyze ${{ matrix.language }}
-    runs-on: ubuntu-latest
+    name: Analyze (${{ matrix.language }})
+    runs-on: "ubuntu-latest"
     timeout-minutes: 360
     permissions:
-      # required for all workflows
       security-events: write
-      # required to fetch internal or private CodeQL packs
-      packages: read
-      actions: read
-      contents: read
+
     strategy:
       fail-fast: false
       matrix:
         include:
+        - language: c-cpp
+          build-mode: manual
+          manual-build-command: pip install -e .
         - language: python
+          build-mode: none
         - language: actions
-
+          build-mode: none
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+    - uses: mongodb-labs/drivers-github-tools/codeql@99b1cbd729bc83bf7fc74e1b2a97fffad3d65d7b  # v3.1.1
       with:
+        language: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        manual-build-command: ${{ matrix.manual-build-command }}
         ref: ${{ inputs.ref }}
-        persist-credentials: false
-    - name: Set up Python
-      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-      with:
-        python-version: 3.x
-
-    # Initializes the CodeQL tools for scanning.
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-      with:
-        languages: ${{ matrix.language }}
-        build-mode: none
         config: |
           paths-ignore:
-            - 'tests/**'
-
-    - shell: bash
-      if: matrix.language == 'python'
-      run: |
-        pip install -e .
-
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-      with:
-        category: "/language:${{ matrix.language }}"
+            - 'doc/**'
+            - 'tools/**'
+            - 'test/**'
