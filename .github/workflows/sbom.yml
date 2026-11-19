@@ -11,6 +11,7 @@ on:
     branches: ['main']
     paths:
       - 'pyproject.toml'
+      - 'requirements/sbom.txt'
 
 permissions:
   contents: write
@@ -37,9 +38,16 @@ jobs:
 
       - name: Generate SBOM
         run: |
+          # Install the pinned runtime dependencies, then the package itself
+          # without re-resolving them, so repeated runs produce identical SBOMs.
+          # Regenerate requirements/sbom.txt when pyproject.toml's dependencies
+          # change (dependabot also keeps it up to date):
+          #   uv pip compile pyproject.toml --python-version 3.11 --no-annotate \
+          #     --output-file requirements/sbom.txt
           python -m venv .venv
           source .venv/bin/activate
-          pip install .
+          pip install -r requirements/sbom.txt
+          pip install --no-deps .
           pip uninstall -y pip setuptools
           deactivate
           python -m venv .venv-sbom
