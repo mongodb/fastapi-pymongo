@@ -12,9 +12,9 @@ Requires the ``beanie`` extra: ``pip install fastapi-pymongo[beanie]``.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import TYPE_CHECKING, Any
 
 from beanie import init_beanie
 from fastapi import FastAPI
@@ -36,8 +36,9 @@ _BEANIE_DRIVER_METADATA = DriverInfo(
 def beanie_lifespan(
     settings: MongoSettings,
     document_models: Sequence[type[Document | UnionDoc | View] | str],
-):
-    """Build a FastAPI ``lifespan`` that opens the client, runs ``init_beanie``, and closes on shutdown.
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    """Build a FastAPI ``lifespan`` that opens the client, runs ``init_beanie``,
+    and closes on shutdown.
 
     This replaces :func:`fastapi_pymongo.mongo_lifespan`. Use one or the
     other, not both. The client it opens is stored the same way, so
@@ -45,6 +46,10 @@ def beanie_lifespan(
     :func:`fastapi_pymongo.lifespan.get_database` keep working unchanged
     for any route that wants the raw PyMongo database alongside Beanie
     document classes.
+
+    :param settings: Connection settings for the client.
+    :param document_models: The Beanie document models to initialize, passed
+        through to ``init_beanie``.
 
     Usage::
 
@@ -54,19 +59,16 @@ def beanie_lifespan(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        # init_beanie also calls database.client.append_metadata(name="beanie").
-        # That doesn't reliably reach the server: it misses each server's
-        # monitor pool, which performs the actual hello handshake (see the
-        # comment on _DRIVER_METADATA in lifespan.py). Only the driver=
-        # argument at client construction, below, is verified to work. So
-        # only "fastapi-pymongo[beanie]" is guaranteed to show up
-        # server-side, not "beanie" as well.
-        client: AsyncMongoClient = AsyncMongoClient(settings.uri, driver=_BEANIE_DRIVER_METADATA)
+        # init_beanie also calls append_metadata(name="beanie"), but that misses
+        # the monitor pool that performs the hello handshake, so it doesn't
+        # reliably reach the server. Only the driver= argument below is
+        # guaranteed server-side (see _DRIVER_METADATA in lifespan.py).
+        client: AsyncMongoClient[dict[str, Any]] = AsyncMongoClient(
+            settings.uri, driver=_BEANIE_DRIVER_METADATA
+        )
         setattr(app.state, _STATE_KEY, client)
         try:
-            await init_beanie(
-                database=client[settings.database], document_models=document_models
-            )
+            await init_beanie(database=client[settings.database], document_models=document_models)
             yield
         finally:
             await client.close()

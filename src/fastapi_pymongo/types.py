@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bson import ObjectId as _ObjectId
-from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
-from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
+
+if TYPE_CHECKING:
+    from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+    from pydantic.json_schema import JsonSchemaValue
+
+_OBJECT_ID_HEX_LENGTH = 24
 
 
 class PyObjectId(_ObjectId):
@@ -19,6 +23,9 @@ class PyObjectId(_ObjectId):
         class Item(BaseModel):
             id: PyObjectId = Field(alias="_id", default_factory=PyObjectId)
             model_config = ConfigDict(populate_by_name=True)
+
+    :raises ValueError: When used as a field type, if the value is neither an
+        ``ObjectId`` nor a valid 24-character hex string.
     """
 
     @classmethod
@@ -27,9 +34,7 @@ class PyObjectId(_ObjectId):
     ) -> core_schema.CoreSchema:
         return core_schema.no_info_plain_validator_function(
             cls._validate,
-            serialization=core_schema.plain_serializer_function_ser_schema(
-                str, when_used="json"
-            ),
+            serialization=core_schema.plain_serializer_function_ser_schema(str, when_used="json"),
         )
 
     @classmethod
@@ -46,8 +51,8 @@ class PyObjectId(_ObjectId):
     ) -> JsonSchemaValue:
         return {
             "type": "string",
-            "minLength": 24,
-            "maxLength": 24,
-            "pattern": "^[0-9a-f]{24}$",
+            "minLength": _OBJECT_ID_HEX_LENGTH,
+            "maxLength": _OBJECT_ID_HEX_LENGTH,
+            "pattern": f"^[0-9a-f]{{{_OBJECT_ID_HEX_LENGTH}}}$",
             "example": "507f1f77bcf86cd799439011",
         }

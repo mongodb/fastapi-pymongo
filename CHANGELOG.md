@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Repository moved into the `mongodb` GitHub organization; the homepage,
+  issue tracker, and documentation links now point to
+  `github.com/mongodb/fastapi-pymongo`.
+- CI and release process overhauled: workflows copied from PyMongo
+  (dist, release, SBOM, CodeQL, pre-commit). Releases now trigger on bare
+  version tags (`0.2.0`), not `v`-prefixed tags (`v0.2.0`); the old
+  `v*` tags no longer build or publish anything.
+
 ### Added
 
 - `pagination` extra: installs `fastapi-pagination` so raw PyMongo collections

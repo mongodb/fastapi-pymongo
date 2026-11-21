@@ -27,14 +27,14 @@ pip install "fastapi-pymongo[pagination]"
 
 ## Examples
 
-- [`examples/quickstart`](https://github.com/aclark4life/fastapi-pymongo/tree/main/examples/quickstart): minimal CRUD app, raw PyMongo.
-- [`examples/beanie`](https://github.com/aclark4life/fastapi-pymongo/tree/main/examples/beanie): same CRUD app on Beanie. Verified against a real MongoDB instance (create/list/get/delete).
+- [`examples/quickstart`](https://github.com/mongodb/fastapi-pymongo/tree/main/examples/quickstart): minimal CRUD app, raw PyMongo.
+- [`examples/beanie`](https://github.com/mongodb/fastapi-pymongo/tree/main/examples/beanie): same CRUD app on Beanie. Verified against a real MongoDB instance (create/list/get/delete).
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest            # unit tests (integration and perf are deselected by default)
+pytest            # unit and integration tests (perf is deselected by default)
 pytest -m perf    # PyObjectId overhead benchmarks
 ruff check src tests examples
 mypy src

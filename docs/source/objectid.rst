@@ -45,8 +45,7 @@ ships a ``MongoObjectId`` with the same goal. Differences:
   (`#405 <https://github.com/pydantic/pydantic-extra-types/pull/405>`_,
   July 2026) but unreleased,
 - its JSON Schema reports only ``minLength``/``maxLength`` and no
-  ``pattern``, so OpenAPI clients can send values the server will reject,
-- it adds a dependency for ~30 lines this package now owns and tests.
+  ``pattern``, so OpenAPI clients can send values the server will reject.
 
 Note that ``pip install "fastapi[standard]"`` already includes
 ``pydantic-extra-types``, so if you used the standard extra, ``MongoObjectId``

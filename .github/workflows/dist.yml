@@ -1,0 +1,53 @@
+name: Python Dist
+
+on:
+  workflow_dispatch:
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+.post[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+[a-b][0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash -eux {0}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ inputs.ref }}
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: 3.x
+    - name: Install dependencies
+      run: pip install build
+    - name: Validate pyproject.toml
+      run: |
+        pip install 'validate-pyproject[all]'
+        validate-pyproject pyproject.toml
+    - name: Create packages
+      run: python -m build .
+    - name: Check dist metadata
+      run: |
+        pip install twine
+        twine check --strict dist/*
+    - name: Store package artifacts
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+          name: all-dist-${{ github.run_id }}
+          path: "dist/*"

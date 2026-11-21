@@ -37,17 +37,24 @@ pagination = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aclark4life/fastapi-pymongo"
-Issues = "https://github.com/aclark4life/fastapi-pymongo/issues"
+Homepage = "https://github.com/mongodb/fastapi-pymongo"
+Issues = "https://github.com/mongodb/fastapi-pymongo/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.ruff]
+line-length = 100
+
 [tool.ruff.lint]
 # B008: `Depends(...)` in argument defaults is FastAPI's documented idiom.
 ignore = ["B008"]
+# E501 is not in ruff's default rule set; select it so the 100-character limit
+# is enforced by `ruff check`, not only by the formatter.
+extend-select = ["E501"]
 
 [tool.mypy]
+strict = true
 # pymongo has no stubs on PyPI; the driver's own annotations cover our usage.
 ignore_missing_imports = true
 

@@ -2,7 +2,7 @@ Beanie integration
 ====================
 
 This walks through
-`examples/beanie <https://github.com/aclark4life/fastapi-pymongo/tree/main/examples/beanie>`_,
+`examples/beanie <https://github.com/mongodb/fastapi-pymongo/tree/main/examples/beanie>`_,
 the same CRUD app as :doc:`quickstart`, built on
 `Beanie <https://github.com/BeanieODM/beanie>`_ instead of raw PyMongo.
 
@@ -83,15 +83,12 @@ and delete all round-trip correctly, including a 404 after delete.
 Where PyObjectId fits
 ------------------------
 
-Nowhere useful, for Beanie models. Overriding ``id`` with
-:class:`fastapi_pymongo.PyObjectId` on a ``beanie.Document`` subclass
-works (verified against a real server: insert, ``get``, and the JSON
-schema all round-trip correctly), but it's redundant. Beanie's own
+While overriding ``id`` with :class:`fastapi_pymongo.PyObjectId` on
+a ``beanie.Document`` subclass works, it's redundant. Beanie's own
 ``PydanticObjectId`` already validates from and serializes to a plain
 string, the same job :class:`~fastapi_pymongo.PyObjectId` does.
 :class:`~fastapi_pymongo.PyObjectId` is for the raw-PyMongo path (see
-:doc:`quickstart` and :doc:`objectid`); leave ``beanie.Document``
-subclasses on Beanie's default ``id`` field.
+:doc:`quickstart` and :doc:`objectid`).
 
 Using both in the same app
 -----------------------------

@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from importlib.metadata import version
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Request
 from pymongo import AsyncMongoClient
-from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.driver_info import DriverInfo
 
 from fastapi_pymongo.settings import MongoSettings
+
+if TYPE_CHECKING:
+    from pymongo.asynchronous.database import AsyncDatabase
 
 _STATE_KEY = "fastapi_pymongo_client"
 
@@ -23,8 +26,12 @@ _STATE_KEY = "fastapi_pymongo_client"
 _DRIVER_METADATA = DriverInfo(name="fastapi-pymongo", version=version("fastapi-pymongo"))
 
 
-def mongo_lifespan(settings: MongoSettings):
+def mongo_lifespan(
+    settings: MongoSettings,
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     """Build a FastAPI ``lifespan`` that opens the client on startup and closes it on shutdown.
+
+    :param settings: Connection settings for the client.
 
     Usage::
 
@@ -34,7 +41,9 @@ def mongo_lifespan(settings: MongoSettings):
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        client: AsyncMongoClient = AsyncMongoClient(settings.uri, driver=_DRIVER_METADATA)
+        client: AsyncMongoClient[dict[str, Any]] = AsyncMongoClient(
+            settings.uri, driver=_DRIVER_METADATA
+        )
         setattr(app.state, _STATE_KEY, client)
         try:
             yield
@@ -44,8 +53,12 @@ def mongo_lifespan(settings: MongoSettings):
     return lifespan
 
 
-def get_client(request: Request) -> AsyncMongoClient:
+def get_client(request: Request) -> AsyncMongoClient[dict[str, Any]]:
     """FastAPI dependency returning the client opened by :func:`mongo_lifespan`.
+
+    :param request: The incoming request, used to read the client off ``app.state``.
+    :raises RuntimeError: If no client is on ``app.state``, i.e. the app was not
+        created with ``lifespan=mongo_lifespan(settings)``.
 
     Usage::
 
@@ -53,7 +66,7 @@ def get_client(request: Request) -> AsyncMongoClient:
         async def list_items(client: AsyncMongoClient = Depends(get_client)):
             ...
     """
-    client = getattr(request.app.state, _STATE_KEY, None)
+    client: AsyncMongoClient[dict[str, Any]] | None = getattr(request.app.state, _STATE_KEY, None)
     if client is None:
         raise RuntimeError(
             "No MongoDB client on app.state. Did you set lifespan=mongo_lifespan(settings)?"
@@ -61,10 +74,13 @@ def get_client(request: Request) -> AsyncMongoClient:
     return client
 
 
-def get_database(settings: MongoSettings):
-    """FastAPI dependency returning the configured database on the shared client."""
+def get_database(settings: MongoSettings) -> Callable[[Request], AsyncDatabase[dict[str, Any]]]:
+    """FastAPI dependency returning the configured database on the shared client.
 
-    def _get_database(request: Request) -> AsyncDatabase:
+    :param settings: Connection settings supplying the database name.
+    """
+
+    def _get_database(request: Request) -> AsyncDatabase[dict[str, Any]]:
         return get_client(request)[settings.database]
 
     return _get_database
