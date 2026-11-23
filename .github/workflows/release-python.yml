@@ -65,6 +65,7 @@ jobs:
     needs: [pre-publish]
     uses: ./.github/workflows/codeql.yml
     permissions:
+      contents: read
       security-events: write
     with:
       ref: ${{ needs.pre-publish.outputs.version }}
